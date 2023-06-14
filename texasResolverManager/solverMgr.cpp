@@ -699,6 +699,41 @@ void onPacket(const net::Buffer::Ptr& packet) {
     }
 }
 
+void heartbeatRoutine() {
+
+    json j;
+    j["WorkerID"] = g_sLocalIP;
+    j["Memory"] = g_dwMemSize / 1024;
+
+
+    for (;;) {
+        auto tasks = json::array();
+
+        taskMapMtx.lock();
+        for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
+            tasks.push_back(it->first);
+        }
+        taskMapMtx.unlock();
+
+        j["Tasks"] = tasks;
+
+        auto jStr = j.dump();
+
+        auto packet = net::Buffer::New(6 + jStr.length());
+
+        packet->Append(uint32_t(2 + jStr.length()));
+
+        packet->Append(uint16_t(1));
+
+        packet->Append(jStr);
+
+        g_netClient->Send(packet);
+
+        std::this_thread::sleep_for(std::chrono::seconds(5));
+    }
+}
+
+
 int main(int argc,char **argv)
 {
 
@@ -738,7 +773,7 @@ int main(int argc,char **argv)
     {
         g_dwResolverNum = 1;
     }
-    printf("max resolve process allowed is :%d\n", g_dwResolverNum);
+    ::printf("max resolve process allowed is :%d\n", g_dwResolverNum);
     //printf("current path is :%s \n", sPath.c_str());
     string sExe1 = sPath + "console_solver.exe";
     //printf("current tesxas console exe is :%s \n", sExe1.c_str());
@@ -768,7 +803,7 @@ int main(int argc,char **argv)
 
     //启动心跳
 
-
+    auto _ = std::thread(heartbeatRoutine);
 
 
     int ch = 0;
@@ -930,6 +965,8 @@ int main(int argc,char **argv)
 
     g_pipeMgr[0].Stop();
     g_pipeMgr[1].Stop();
+
+    g_netClient = nullptr;
 
     ::WSACleanup();
 }
