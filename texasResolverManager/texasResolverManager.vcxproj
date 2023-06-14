@@ -128,11 +128,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="net.cpp" />
     <ClCompile Include="rpipe.cpp" />
     <ClCompile Include="solverMgr.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="buffer.h" />
     <ClInclude Include="global.h" />
+    <ClInclude Include="json.hpp" />
+    <ClInclude Include="net.h" />
     <ClInclude Include="rpipe.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

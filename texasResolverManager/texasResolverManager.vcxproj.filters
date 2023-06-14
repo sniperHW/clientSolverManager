@@ -21,12 +21,24 @@
     <ClCompile Include="rpipe.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="net.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="global.h">
       <Filter>头文件</Filter>
     </ClInclude>
     <ClInclude Include="rpipe.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="buffer.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="json.hpp">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="net.h">
       <Filter>头文件</Filter>
     </ClInclude>
   </ItemGroup>

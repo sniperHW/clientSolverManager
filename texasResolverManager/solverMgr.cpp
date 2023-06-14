@@ -9,6 +9,11 @@
 #include <vector>
 #include <math.h>
 #include <memoryapi.h>
+#include <mutex>
+#include <condition_variable>
+
+#include "json.hpp"
+#include "net.h"
 
 #include  "rpipe.h"
 
@@ -17,6 +22,7 @@
 #pragma comment(lib, "Mpr.lib")
 
 using namespace std;
+using json = nlohmann::json;
 
 typedef struct _TASKINFO
 {
@@ -89,13 +95,7 @@ void GetSytemInfo()
         printf("mem size:%d \n", g_dwMemSize);
     }
 
-    WSADATA wsaData;
-    WORD sockVersion = MAKEWORD(2, 2);
-    //初始化socket环境
-    if (::WSAStartup(sockVersion, &wsaData) != 0)
-    {
-        return;
-    }
+
 
     //获得主机名称
     char szHost[256] = { 0 };
@@ -118,7 +118,7 @@ void GetSytemInfo()
         strIP.append( "|");
         g_sLocalIP.append(strIP);
     }
-    ::WSACleanup();
+
     printf(" local ip:%s \n", g_sLocalIP.c_str());
 }
 
@@ -157,10 +157,125 @@ void getState(string& sComputerName, string& sIP, int& nMemSize, int& nErrorCode
     nErrorCode = g_nErrorCode; //返回错误码
 }
 
+
+net::NetClient::Ptr g_netClient = nullptr;
+
+enum taskState {
+    taskRunning, 
+    taskWaitCommit,
+    taskFinish,
+    taskCancel,
+};
+
+struct task {
+    std::mutex  mtx;
+    std::condition_variable_any cv;
+    std::string taskID;
+    std::string resultPath;
+    taskState   state;
+
+    void setStateAndNotify(taskState state) {
+        mtx.lock();
+        this->state = state;
+        mtx.unlock();
+        cv.notify_one();
+    }
+
+    taskState getState() {
+        std::lock_guard<std::mutex> guard(mtx);
+        return state;
+    }
+};
+
+std::map<std::string, task*> taskMap;
+std::mutex taskMapMtx;
+
+
+void commitTaskRoutine(task* task) {
+    using json = nlohmann::json;
+    json j;
+    j["TaskID"] = task->taskID;
+    
+    auto jStr = j.dump();
+    auto packet = net::Buffer::New(6 + jStr.length());
+
+    packet->Append(uint32_t(2 + jStr.length()));
+    packet->Append(uint16_t(3));
+    packet->Append(jStr);
+
+    std::lock_guard<std::mutex> guard(task->mtx);
+    
+    //重复提交任务，直到接收到提交成功或任务取消
+    for (;;) {
+        g_netClient->Send(packet);
+        task->cv.wait_for(task->mtx,chrono::seconds(1));//如果没有被唤醒，则等待一秒
+        if (task->state == taskCancel || task->state == taskFinish) {
+            json j;
+            j["WorkerID"] = g_sLocalIP;
+
+            auto tasks = json::array();
+
+            taskMapMtx.lock();
+            taskMap.erase(task->taskID);
+            for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
+                tasks.push_back(it->first);
+            }
+            taskMapMtx.unlock();
+
+            delete(task);
+
+            j["Tasks"] = tasks;
+
+            //立刻发送一个心跳包通知服务服务器有空闲资源
+            auto jStr = j.dump();
+
+            auto packet = net::Buffer::New(6 + jStr.length());
+
+            packet->Append(uint32_t(2 + jStr.length()));
+
+            packet->Append(uint16_t(1));
+
+            packet->Append(jStr);
+
+            g_netClient->Send(packet);
+
+            return;
+        }
+    }
+}
+
+
+
+
+
 //接口：任务结束的回调函数，参数为任务ID
 void TaskFinish(const string& sTaskID)
 {
     cout << "task finish callback " << sTaskID << endl;
+    taskMapMtx.lock();
+    auto task = taskMap[sTaskID];
+    taskMapMtx.unlock();
+    if (task == nullptr) {
+        //不应该发生
+        return;
+    }
+
+    task->mtx.lock();
+    if (task->state == taskRunning) {
+        task->state = taskWaitCommit;
+    }
+    else {
+        task->mtx.unlock();
+        return;
+    }
+    task->mtx.unlock();
+
+    //将文件复制到共享文件夹task.resultPath
+
+    
+    //启动提交routine,
+    auto _ = std::thread(commitTaskRoutine,task);
+
 }
 
 void SetTaskFiniedCallback(FuncTaskFinish callback)
@@ -456,9 +571,151 @@ void usage()
     printf("h|help--help \n");
 }
 
-int main()
+
+bool copyCfgFile(const std::string& path, const std::string& taskID) {
+    std::ifstream infile;
+    infile.open("z:\\" + path);
+    if (!infile.is_open()) {
+        return false;
+    }
+
+    std::vector<std::string> lines;
+
+    bool ok = true;
+
+
+    std::string s;
+    while (getline(infile, s)) {
+        if (s.find("dump")) {
+            ok = true;
+            lines.push_back("dump " + taskID + ".json");
+        }
+        else {
+            lines.push_back(s);
+        }
+    }
+
+    infile.close();
+
+    if (!ok) {
+        return false;
+    }
+
+
+    std::ofstream ofs;
+    ofs.open(taskID, std::ios::out);
+    for (auto it = lines.begin(); it != lines.end(); it++) {
+        ofs << *it << std::endl;
+    }
+    ofs.close();
+
+    return true;
+}
+
+
+void onPacket(const net::Buffer::Ptr& packet) {
+    auto rawBuf = packet->BuffPtr();
+    auto cmd = ::ntohs(*(uint16_t*)rawBuf);
+    auto jsonStr = std::string(&rawBuf[2], packet->Len() - 2);
+    auto msg = json::parse(jsonStr);
+
+    switch (cmd) {
+    case 2: {//CmdDispatchJob
+            auto taskID = msg["TaskID"].get<std::string>();
+            auto CfgPath = msg["TaskID"].get<std::string>();
+            auto ResultPath = msg["TaskID"].get<std::string>();
+            taskMapMtx.lock();
+            auto t = taskMap[msg["TaskID"].get<std::string>()];
+            taskMapMtx.unlock();
+            if (t != nullptr) {
+                return;
+            }
+
+            //将cfg文件复制到本地，并做改写
+            bool ok = false;
+            auto c = 0;
+            for (; c < 3; c++) {
+                ok = copyCfgFile(CfgPath, taskID);
+                if (!ok) {
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                }
+            }
+
+            if (!ok) {
+                return;
+            }
+
+            toSolve(taskID, taskID);
+            
+            t = new task();
+            t->taskID = taskID;
+            t->resultPath = ResultPath;
+            t->state = taskRunning;
+
+            json j;
+            j["WorkerID"] = g_sLocalIP;
+
+            auto tasks = json::array();
+
+            taskMapMtx.lock();
+            taskMap[taskID] = t;
+            for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
+                tasks.push_back(it->first);
+            }
+            taskMapMtx.unlock();
+
+            j["Tasks"] = tasks;
+
+            //立刻发送一个心跳包通知服务器work的任务信息
+            auto jStr = j.dump();
+
+            auto packet = net::Buffer::New(6 + jStr.length());
+
+            packet->Append(uint32_t(2 + jStr.length()));
+
+            packet->Append(uint16_t(1));
+
+            packet->Append(jStr);
+
+            g_netClient->Send(packet);
+
+        }
+        break;
+    case 4://CmdAcceptJobResult = uint16(4)
+    case 5: {//CmdCancelJob       = uint16(5)
+            taskMapMtx.lock();
+            auto task = taskMap[msg["TaskID"].get<std::string>()];
+            taskMapMtx.unlock();
+            if (task != nullptr) {
+                if (cmd == 4) {
+                    task->setStateAndNotify(taskFinish);
+                }
+                else {
+                    task->setStateAndNotify(taskCancel);
+                }
+            }
+        }
+        break;
+    }
+}
+
+int main(int argc,char **argv)
 {
+
+    const char* serverIp = "127.0.0.1";
+    u_short serverPort = 18889;
+
+
     DBG_CONTROL_BREAK;
+
+    WSADATA wsaData;
+    WORD sockVersion = MAKEWORD(2, 2);
+    //初始化socket环境
+    if (::WSAStartup(sockVersion, &wsaData) != 0)
+    {
+        return -1;
+    }
+
 
     GetSytemInfo();
 
@@ -491,6 +748,28 @@ int main()
 
     g_pipeMgr[1].SetExePath(sExe1);
     g_pipeMgr[1].Start(2);
+
+
+    if (argc > 2) {
+        serverIp = argv[1];
+        serverPort = ::atoi(argv[2]);
+    }
+
+    //先连接上服务器
+    for (;;) {
+        g_netClient = net::NetClient::New(serverIp, serverPort, onPacket);
+        if (g_netClient != nullptr) {
+            break;
+        }
+        else {
+            ::Sleep(1000);
+        }
+    }
+
+    //启动心跳
+
+
+
 
     int ch = 0;
     BOOL bRun = TRUE;
@@ -651,5 +930,7 @@ int main()
 
     g_pipeMgr[0].Stop();
     g_pipeMgr[1].Stop();
+
+    ::WSACleanup();
 }
 
