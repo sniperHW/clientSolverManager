@@ -11,6 +11,8 @@
 #include <memoryapi.h>
 #include <mutex>
 #include <condition_variable>
+#include <filesystem>
+//namespace fs = std::filesystem;
 
 #include "json.hpp"
 #include "net.h"
@@ -31,6 +33,14 @@ typedef struct _TASKINFO
     int nIterationNum;
     double dExploit;
     BOOL bFinished;
+
+    _TASKINFO() {}
+
+
+    _TASKINFO(const string& sCurTaskID, int nContinuedSeconds, int nIterationNum, double dExploit) :
+        sCurTaskID(sCurTaskID), nContinuedSeconds(nContinuedSeconds), nIterationNum(nIterationNum), dExploit(dExploit) {}
+
+
 }TASKINFO, *LPTASKINFO;
 
 CResolverPipe g_pipeMgr[2];
@@ -173,6 +183,13 @@ struct task {
     std::string taskID;
     std::string resultPath;
     taskState   state;
+    int         nContinuedSeconds; //单位，毫秒
+    int         nIterationNum;
+    double      dExploit;
+
+    task():nContinuedSeconds(0), nIterationNum(0), dExploit(0) {
+
+    }
 
     void setStateAndNotify(taskState state) {
         mtx.lock();
@@ -190,58 +207,84 @@ struct task {
 std::map<std::string, task*> taskMap;
 std::mutex taskMapMtx;
 
-
-void commitTaskRoutine(task* task) {
-    using json = nlohmann::json;
+net::Buffer::Ptr makeHeartBeatPacket(const std::vector<TASKINFO> &tasks) {
     json j;
-    j["TaskID"] = task->taskID;
-    
+    j["WorkerID"] = g_sLocalIP;
+    j["Memory"]   = g_dwMemSize / 1024;
+    auto Tasks = json::array();
+
+    for (auto it = tasks.begin(); it != tasks.end(); it++) {
+        json t;
+        t["TaskID"] = (* it).sCurTaskID;
+        t["ContinuedSeconds"] = (*it).nContinuedSeconds;
+        t["IterationNum"] = (*it).nIterationNum;
+        t["Exploit"] = (*it).dExploit;
+        Tasks.push_back(t);
+    }
+
+    j["Tasks"] = Tasks;
+
     auto jStr = j.dump();
+
     auto packet = net::Buffer::New(6 + jStr.length());
 
     packet->Append(uint32_t(2 + jStr.length()));
-    packet->Append(uint16_t(3));
+
+    packet->Append(uint16_t(1));
+
     packet->Append(jStr);
 
-    std::lock_guard<std::mutex> guard(task->mtx);
+    return packet;
+
+}
+
+
+void commitTaskRoutine(task* task) {
+
+    //读取result文件
+
+    if (std::ifstream is{ task->taskID + ".json", std::ios::binary | std::ios::ate}) {
+        auto size = is.tellg();
+        std::string str(size, '\0'); // construct string to stream size
+        is.seekg(0);
+        if (is.read(&str[0], size))
+            std::cout << str << '\n';
     
-    //重复提交任务，直到接收到提交成功或任务取消
-    for (;;) {
-        g_netClient->Send(packet);
-        task->cv.wait_for(task->mtx,chrono::seconds(1));//如果没有被唤醒，则等待一秒
-        if (task->state == taskCancel || task->state == taskFinish) {
-            json j;
-            j["WorkerID"] = g_sLocalIP;
+    
+        json j;
+        j["TaskID"] = task->taskID;
+        j["Result"] = str;
 
-            auto tasks = json::array();
+        auto jStr = j.dump();
+        auto packet = net::Buffer::New(6 + jStr.length());
 
-            taskMapMtx.lock();
-            taskMap.erase(task->taskID);
-            for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
-                tasks.push_back(it->first);
-            }
-            taskMapMtx.unlock();
+        packet->Append(uint32_t(2 + jStr.length()));
+        packet->Append(uint16_t(3));
+        packet->Append(jStr);
 
-            delete(task);
+        std::lock_guard<std::mutex> guard(task->mtx);
 
-            j["Tasks"] = tasks;
-
-            //立刻发送一个心跳包通知服务服务器有空闲资源
-            auto jStr = j.dump();
-
-            auto packet = net::Buffer::New(6 + jStr.length());
-
-            packet->Append(uint32_t(2 + jStr.length()));
-
-            packet->Append(uint16_t(1));
-
-            packet->Append(jStr);
-
+        //重复提交任务，直到接收到提交成功或任务取消
+        for (;;) {
             g_netClient->Send(packet);
+            task->cv.wait_for(task->mtx, chrono::seconds(1));//如果没有被唤醒，则等待一秒
+            if (task->state == taskCancel || task->state == taskFinish) {
+                std::vector<TASKINFO> tasks;
+                taskMapMtx.lock();
+                taskMap.erase(task->taskID);
+                for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
+                    tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
+                }
+                taskMapMtx.unlock();
 
-            return;
+                delete(task);
+
+                g_netClient->Send(makeHeartBeatPacket(tasks));
+                return;
+            }
         }
     }
+
 }
 
 
@@ -269,9 +312,6 @@ void TaskFinish(const string& sTaskID)
         return;
     }
     task->mtx.unlock();
-
-    //将文件复制到共享文件夹task.resultPath
-
     
     //启动提交routine,
     auto _ = std::thread(commitTaskRoutine,task);
@@ -571,7 +611,7 @@ void usage()
     printf("h|help--help \n");
 }
 
-
+/*
 bool copyCfgFile(const std::string& path, const std::string& taskID) {
     std::ifstream infile;
     infile.open("z:\\" + path);
@@ -610,7 +650,7 @@ bool copyCfgFile(const std::string& path, const std::string& taskID) {
     ofs.close();
 
     return true;
-}
+}*/
 
 
 void onPacket(const net::Buffer::Ptr& packet) {
@@ -632,7 +672,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
             }
 
             //将cfg文件复制到本地，并做改写
-            bool ok = false;
+            /*bool ok = false;
             auto c = 0;
             for (; c < 3; c++) {
                 ok = copyCfgFile(CfgPath, taskID);
@@ -643,7 +683,14 @@ void onPacket(const net::Buffer::Ptr& packet) {
 
             if (!ok) {
                 return;
-            }
+            }*/
+
+
+            std::ofstream ofs;
+            ofs.open(taskID, std::ios::out);
+            ofs << msg["Cfg"].get<std::string>();
+            ofs.close();
+
 
             toSolve(taskID, taskID);
             
@@ -652,39 +699,32 @@ void onPacket(const net::Buffer::Ptr& packet) {
             t->resultPath = ResultPath;
             t->state = taskRunning;
 
-            json j;
-            j["WorkerID"] = g_sLocalIP;
 
-            auto tasks = json::array();
-
+            std::vector<TASKINFO> tasks;
             taskMapMtx.lock();
             taskMap[taskID] = t;
             for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
-                tasks.push_back(it->first);
+                tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
             }
             taskMapMtx.unlock();
-
-            j["Tasks"] = tasks;
-
-            //立刻发送一个心跳包通知服务器work的任务信息
-            auto jStr = j.dump();
-
-            auto packet = net::Buffer::New(6 + jStr.length());
-
-            packet->Append(uint32_t(2 + jStr.length()));
-
-            packet->Append(uint16_t(1));
-
-            packet->Append(jStr);
-
-            g_netClient->Send(packet);
-
+            g_netClient->Send(makeHeartBeatPacket(tasks));
         }
         break;
     case 4://CmdAcceptJobResult = uint16(4)
     case 5: {//CmdCancelJob       = uint16(5)
+            
+
+            auto taskID = msg["TaskID"].get<std::string>();
+            
+            //删除本地文件
+            std::filesystem::remove(taskID); //cfg文件
+            std::filesystem::remove(taskID+".json");//结果文件
+            
+        
+        
+        
             taskMapMtx.lock();
-            auto task = taskMap[msg["TaskID"].get<std::string>()];
+            auto task = taskMap[taskID];
             taskMapMtx.unlock();
             if (task != nullptr) {
                 if (cmd == 4) {
@@ -701,35 +741,35 @@ void onPacket(const net::Buffer::Ptr& packet) {
 
 void heartbeatRoutine() {
 
-    json j;
-    j["WorkerID"] = g_sLocalIP;
-    j["Memory"] = g_dwMemSize / 1024;
-
-
     for (;;) {
-        auto tasks = json::array();
+        string sComputerName;
+        string sIP;
+        int   nMemSize;
+        int nErrorCode;
+        vector<TASKINFO> taskInfos;
+        getState(sComputerName, sIP, nMemSize, nErrorCode, taskInfos);
+
+        vector<TASKINFO> tasks;
 
         taskMapMtx.lock();
-        for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
-            tasks.push_back(it->first);
+        for (auto it = taskInfos.begin(); it != taskInfos.end(); it++) {
+            auto it_ = taskMap.find(it->sCurTaskID);
+            if (it_ != taskMap.end()) {
+                it_->second->nContinuedSeconds = it->nContinuedSeconds;
+                it_->second->nIterationNum = it->nIterationNum;
+                it_->second->dExploit = it->dExploit;
+            }
         }
+
+        for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
+            tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
+        }
+
         taskMapMtx.unlock();
 
-        j["Tasks"] = tasks;
+        g_netClient->Send(makeHeartBeatPacket(tasks));
 
-        auto jStr = j.dump();
-
-        auto packet = net::Buffer::New(6 + jStr.length());
-
-        packet->Append(uint32_t(2 + jStr.length()));
-
-        packet->Append(uint16_t(1));
-
-        packet->Append(jStr);
-
-        g_netClient->Send(packet);
-
-        std::this_thread::sleep_for(std::chrono::seconds(5));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 }
 
