@@ -18,3 +18,4 @@ typedef enum _PEOCESS_STATE
 
 #define NANE_EVENT_RUN_1 "Global\\TexasEventRun1"
 #define NANE_EVENT_RUN_1=2 "Global\\TexasEventRun2"
+

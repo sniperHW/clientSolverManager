@@ -25,6 +25,8 @@ CResolverPipe::CResolverPipe()
     m_hEventStop =CreateEventA(NULL, TRUE, FALSE, NULL);
     m_bNeedReRuntask = FALSE;
     m_bCanDisconnectPipe = FALSE;
+    m_dwRetryCount = 0;
+    m_dwReCreateProcessCount = 0;
 }
  CResolverPipe::~CResolverPipe()
 {
@@ -179,6 +181,16 @@ DWORD CResolverPipe::ThreadProcMonitorProcess()
             printf(" 进程退出index：%d-任务状态：%d-processID:%d \n", m_dwProcessIndex, m_dwProcessState, pi.dwProcessId);
             CloseHandle(hWait[1]);
             ZeroMemory(&pi, sizeof(pi));
+            if (STATE_PROCESS_START == m_dwProcessState )
+            {
+                Sleep(2000);
+                m_dwReCreateProcessCount++;
+            }
+            if (m_dwReCreateProcessCount > 20)
+            {
+                printf(" 子进程连续启动超过20次,都异常退出 \n");
+                break;
+            }
             m_dwProcessState = STATE_PROCESS_START;
             si.wShowWindow = SW_SHOW;
             bRet = CreateProcessA(
@@ -347,14 +359,19 @@ int CResolverPipe::ReadPipeProc()
            case  PIPEMSG_READY:
            {
 			   m_dwProcessState = STATE_PROCESS_READY;
+               m_dwReCreateProcessCount = 0;
                printf("resolve is ready:%d \n", m_dwProcessIndex);
 			   if (TRUE == m_bNeedReRuntask)
 			   {
 				   if (!m_stringConfigFile.empty())
 				   {
-					   int iRet = ReRunTask();
-
-					   printf("runTask ret: iRet:%d \n", iRet);
+                       if (m_dwRetryCount < 10)
+                       {
+                           int iRet = ReRunTask();
+                           printf("runTask ret: iRet:%d \n", iRet);
+                       }
+                       m_dwRetryCount++;
+	
 				   }
 			   }
 			   else
@@ -365,6 +382,9 @@ int CResolverPipe::ReadPipeProc()
 		   case  PIPEMSG_RUNING:
            {
                m_bNeedReRuntask = TRUE;
+               m_nIterationNum = 0;
+               m_dExploit = 0;
+               m_dwReCreateProcessCount = 0;
                m_dwProcessState = STATE_PROCESS_RUNNING;
                break;
            }
@@ -376,6 +396,7 @@ int CResolverPipe::ReadPipeProc()
                {
                    g_funTaskFinished(m_strTaskID);
                }
+               m_dwRetryCount = 0;
                m_bNeedReRuntask = FALSE;
                break;
            }

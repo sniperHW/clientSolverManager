@@ -96,6 +96,8 @@ public:
 		}
 	};
 private:
+	DWORD m_dwRetryCount;
+	DWORD m_dwReCreateProcessCount;
 	DWORD m_nIterationNum;
 	double m_dExploit;
 
