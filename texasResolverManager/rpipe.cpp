@@ -27,6 +27,7 @@ CResolverPipe::CResolverPipe()
     m_bCanDisconnectPipe = FALSE;
     m_dwRetryCount = 0;
     m_dwReCreateProcessCount = 0;
+    m_hSolverProcess = INVALID_HANDLE_VALUE;
 }
  CResolverPipe::~CResolverPipe()
 {
@@ -132,13 +133,106 @@ DWORD CResolverPipe::Start(int dwProcessIndex)
     return 0;
 }
 
+int CResolverPipe::StartResolverProcess()
+{
+    PROCESS_INFORMATION pi = { 0 };
+    STARTUPINFOEX si = { 0 };
+    int      iRet = 0;
+    int     nIndex = 0;
+
+    LPPROC_THREAD_ATTRIBUTE_LIST pAttribs = NULL;
+    WORD iNuma = (WORD)(m_dwProcessIndex - 1);
+    //STARTUPINFOEX sInfoEx;
+    //sInfoEx.StartupInfo.cb = sizeof(sInfoEx);
+    SIZE_T size = { 0 };
+    BOOL  bSuccess = FALSE;
+   // auto fCreationFlags = EXTENDED_STARTUPINFO_PRESENT;
+    char sCommand[512] = { 0 };
+
+    if (m_strExePath.empty())
+    {
+        printf(" create Process m_strExePath is empty");
+        return -101;
+    }
+
+     bSuccess = InitializeProcThreadAttributeList(0, 1, 0, &size);
+    if ((SIZE_T)0 == size)
+    {
+        printf("InitializeProcThreadAttributeList failed:%d\n", GetLastError());
+        return -102;
+    }
+    pAttribs = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(HeapAlloc(GetProcessHeap(), 0, size));
+    if (NULL == pAttribs)
+    {
+        printf("mem allloc failed:%d\n", GetLastError());
+        return -103;
+    }
+    bSuccess = InitializeProcThreadAttributeList(pAttribs, 1, 0, &size);
+    if (FALSE == bSuccess)
+    {
+        printf("InitializeProcThreadAttributeList----2 failed:%d\n", GetLastError());
+        if (NULL != pAttribs)
+        {
+            bSuccess = HeapFree(GetProcessHeap(), 0, pAttribs);
+            if (FALSE == bSuccess)
+            {
+                printf("HeapFree failed:%d\n", GetLastError());
+                return -6;
+            }
+        }
+        return -104;
+    }
+
+    bSuccess = UpdateProcThreadAttribute(pAttribs, 0,
+        PROC_THREAD_ATTRIBUTE_PREFERRED_NODE,
+        &iNuma, sizeof(iNuma), NULL, NULL);
+    if (FALSE == bSuccess)
+    {
+        printf("UpdateProcThreadAttribute failed:%d\n", GetLastError());
+        if (NULL != pAttribs)
+        {
+            DeleteProcThreadAttributeList(pAttribs);
+            bSuccess = HeapFree(GetProcessHeap(), 0, pAttribs);
+            if (FALSE == bSuccess)
+            {
+                printf("HeapFree failed:%d\n", GetLastError());
+                return -6;
+            }
+        }
+        return -105;
+    }
+
+    si.StartupInfo.cb = sizeof(si);
+    si.lpAttributeList = pAttribs;
+
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.StartupInfo.wShowWindow = /*SW_MINIMIZESW_HIDE; //*/ SW_SHOW;
+
+
+
+    sprintf_s(sCommand, 512, "%s  -n %d", m_strExePath.c_str(), m_dwProcessIndex);
+    BOOL bRet = CreateProcessA(
+        m_strExePath.c_str(),
+        &sCommand[0],
+        NULL, NULL, TRUE,
+        NORMAL_PRIORITY_CLASS | CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP| EXTENDED_STARTUPINFO_PRESENT,// CREATE_NO_WINDOW,
+        NULL, NULL, &si.StartupInfo, &pi);
+    if (FALSE == bRet)
+    {
+        printf(" create failed error:%d--processNO:%d\n", GetLastError(), m_dwProcessIndex);
+        return 101;
+    }
+    printf("启动console进程成功index：%d--processID:%d \n", m_dwProcessIndex, pi.dwProcessId);
+    CloseHandle(pi.hThread);
+    m_hSolverProcess = pi.hProcess;
+    m_dwSovlerProcessID = pi.dwProcessId;
+    return 0;
+}
 
 
 DWORD CResolverPipe::ThreadProcMonitorProcess()
 {
 
-    PROCESS_INFORMATION pi = { 0 };
-    STARTUPINFO si = { 0 };
     int iRet = 0;
     HANDLE  hWait[2] = { 0 };
     int     nIndex = 0;
@@ -147,27 +241,16 @@ DWORD CResolverPipe::ThreadProcMonitorProcess()
 		printf(" create Process m_strExePath is empty");
 		return 101;
 	}
-    char sCommand[1024] = { 0 };
-    sprintf_s(sCommand, 1024, "%s  -n %d", m_strExePath.c_str(), m_dwProcessIndex);
-    si.cb = sizeof(STARTUPINFO);
-    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-    si.wShowWindow = /*SW_MINIMIZESW_HIDE; //*/ SW_SHOW;
-	BOOL bRet = CreateProcessA(
-        m_strExePath.c_str(),
-        &sCommand[0],
-        NULL,NULL, TRUE,
-        NORMAL_PRIORITY_CLASS | CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP,// CREATE_NO_WINDOW,
-        NULL, NULL, &si, &pi);
-	if (FALSE == bRet)
+    iRet = StartResolverProcess();
+	if ( 0  != iRet)
 	{
 		printf(" create failed error:%d--processNO:%d\n", GetLastError(), m_dwProcessIndex);
 		return 101;
 	}
-    printf("启动console进程成功index：%d--processID:%d \n", m_dwProcessIndex, pi.dwProcessId);
-    CloseHandle(pi.hThread);
+
 	m_dwProcessState = STATE_PROCESS_START;
 	hWait[0] = m_hEventStop;
-	hWait[1] = pi.hProcess;
+	hWait[1] = m_hSolverProcess;
 	while (m_bRun)
 	{
          nIndex = WaitForMultipleObjects(2, hWait, FALSE, INFINITE);
@@ -175,12 +258,12 @@ DWORD CResolverPipe::ThreadProcMonitorProcess()
         {
             printf(" WaitForMultipleObjects stop--processNO:%d\n",  m_dwProcessIndex);
             CloseHandle(hWait[1]);
+            break;
         }
         else if (nIndex == (WAIT_OBJECT_0 +1) )
         {
-            printf(" 进程退出index：%d-任务状态：%d-processID:%d \n", m_dwProcessIndex, m_dwProcessState, pi.dwProcessId);
+            printf(" 进程退出index：%d-任务状态：%d-processID:%d \n", m_dwProcessIndex, m_dwProcessState, m_dwSovlerProcessID);
             CloseHandle(hWait[1]);
-            ZeroMemory(&pi, sizeof(pi));
             if (STATE_PROCESS_START == m_dwProcessState )
             {
                 Sleep(2000);
@@ -192,24 +275,15 @@ DWORD CResolverPipe::ThreadProcMonitorProcess()
                 break;
             }
             m_dwProcessState = STATE_PROCESS_START;
-            si.wShowWindow = SW_SHOW;
-            bRet = CreateProcessA(
-                m_strExePath.c_str(), 
-                &sCommand[0],
-                NULL, NULL, TRUE,
-                NORMAL_PRIORITY_CLASS | CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP, //CREATE_NO_WINDOW,
-                NULL, NULL, &si, &pi
-            );
-            if (FALSE == bRet)
+
+            iRet = StartResolverProcess();
+            if (0 != iRet)
             {
                 printf(" create failed error:%d--processNO:%d\n", GetLastError(), m_dwProcessIndex);
-                m_dwProcessState = STATE_PROCESS_STOPPED;
                 return 101;
             }
-            printf("重新启动console进程成功index：%d--processID:%d \n",  m_dwProcessIndex, pi.dwProcessId);
             m_dwProcessState = STATE_PROCESS_START;
-            CloseHandle(pi.hThread);
-            hWait[1] = pi.hProcess;
+            hWait[1] = m_hSolverProcess;
         }
         else
         {

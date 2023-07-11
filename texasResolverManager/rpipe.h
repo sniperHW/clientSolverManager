@@ -54,6 +54,7 @@ public:
 	DWORD Start(int dwProcessIndex);
 	int   StopServerPipe(BOOL bReadPipe);
 	int   ReopenWritePipe();
+	int StartResolverProcess();
 	void SetExePath(string strExePath)
 	{
 		m_strExePath = strExePath;
@@ -104,6 +105,8 @@ private:
 	DWORD m_dwStartTick;
 	DWORD m_dwFinishedSeconds;
 	DWORD m_dwProcessIndex;
+	HANDLE m_hSolverProcess;
+	DWORD m_dwSovlerProcessID;
 	string  m_strTaskID;
 	string m_stringConfigFile;
 	HANDLE m_hPipeRead;

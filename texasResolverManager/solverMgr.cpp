@@ -905,10 +905,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
             //删除本地文件
             filesystem::remove(taskID); //cfg文件
             std::filesystem::remove(taskID+".json");//结果文件
-            
-        
-        
-        
+                    
             taskMapMtx.lock();
             auto task = taskMap[taskID];
             taskMapMtx.unlock();
@@ -959,14 +956,45 @@ void heartbeatRoutine() {
     }
 }
 
+int  InitTaskShedule()
+{
+    char serverIp[64] = { 0 };
 
+
+    std::string sPath = GetCurrentPath();
+    string sConfigFile = sPath + "resolvermanager.ini";
+
+    DWORD dwRet = GetPrivateProfileStringA("taskserver", "IP", "127.0.0.1",
+        serverIp, 64, sConfigFile.c_str());
+    if (dwRet < 7)
+    {
+        ::printf(" Get taskserver IP from  config file  failed:%d\n", GetLastError());
+        return -1;
+    }
+
+    u_short serverPort =  (u_short)GetPrivateProfileIntA("taskserver", "Port",
+        18889, sConfigFile.c_str());
+
+    //先连接上服务器
+    for (;;) {
+        g_netClient = net::NetClient::New(serverIp, serverPort, onPacket);
+        if (g_netClient != nullptr) {
+            break;
+        }
+        else {
+            ::Sleep(1000);
+        }
+    }
+
+    //启动心跳
+    auto _ = std::thread(heartbeatRoutine);
+
+    return 0;
+}
 int main(int argc,char **argv)
 {
 
     int iRet = -1;
-
-    const char* serverIp = "127.0.0.1";
-    u_short serverPort = 18889;
 
 
     WSADATA wsaData;
@@ -1023,27 +1051,6 @@ int main(int argc,char **argv)
     g_pipeMgr[1].Start(2);
 
 
-    if (argc > 2) {
-        serverIp = argv[1];
-        serverPort = ::atoi(argv[2]);
-    }
-
-    //先连接上服务器
-    for (;;) {
-        g_netClient = net::NetClient::New(serverIp, serverPort, onPacket);
-        if (g_netClient != nullptr) {
-            break;
-        }
-        else {
-            ::Sleep(1000);
-        }
-    }
-
-    //启动心跳
-
-    auto _ = std::thread(heartbeatRoutine);
-
-
     int ch = 0;
     BOOL bRun = TRUE;
     string strInput;
@@ -1051,6 +1058,19 @@ int main(int argc,char **argv)
     string strCmd;
 
     SetTaskFiniedCallback(TaskFinish);
+    if (0 != InitTaskShedule())
+    {
+
+        ::printf(" InitTaskShedule failed \n");
+        g_pipeMgr[0].Stop();
+        g_pipeMgr[1].Stop();
+
+        g_netClient = nullptr;
+
+        ::WSACleanup();
+        return -11;
+    }
+
     usage(); //命令行测试说明
     while (bRun)
     {
