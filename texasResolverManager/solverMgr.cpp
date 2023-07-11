@@ -175,7 +175,7 @@ struct task {
     std::mutex  mtx;
     std::condition_variable_any cv;
     std::string taskID;
-    std::string resultPath;
+    //std::string resultPath;
     taskState   state;
     int         nContinuedSeconds; //单位，毫秒
     int         nIterationNum;
@@ -256,7 +256,9 @@ void commitTaskRoutine(task* task) {
         packet->Append(uint16_t(3));
         packet->Append(jStr);
 
-        std::lock_guard<std::mutex> guard(task->mtx);
+        //std::lock_guard<std::mutex> guard(task->mtx);
+
+        task->mtx.lock();
 
         //重复提交任务，直到接收到提交成功或任务取消
         for (;;) {
@@ -270,6 +272,8 @@ void commitTaskRoutine(task* task) {
                     tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
                 }
                 taskMapMtx.unlock();
+
+                task->mtx.unlock();
 
                 delete(task);
 
@@ -882,7 +886,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
             
             t = new task();
             t->taskID = taskID;
-            t->resultPath = ResultPath;
+            //t->resultPath = ResultPath;
             t->state = taskRunning;
 
 

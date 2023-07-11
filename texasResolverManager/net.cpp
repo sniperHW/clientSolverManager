@@ -9,7 +9,9 @@ namespace net {
 	}
 
 	bool NetClient::onRead() {
-		int n = ::recv(socket, &readbuff[readoffset], sizeof(readbuff) - readoffset,0);
+		const int sizeofLen = sizeof(uint32_t);
+
+		int n = ::recv(socket, &readbuff[readoffset], sizeof(readbuff) - readoffset, 0);
 		if (n == SOCKET_ERROR) {
 			auto e = WSAGetLastError();
 			if (e != WSAEWOULDBLOCK) {
@@ -18,16 +20,16 @@ namespace net {
 		}
 		else {
 			dataSize += n;
-			for (; dataSize > 2;) {
+			for (; dataSize >= sizeofLen;) {
 				auto packetLen = (int)::ntohl(*reinterpret_cast<uint32_t*>(&readbuff[readoffset]));
-				if (packetLen - 2 > sizeof(readbuff)) {
+				if (packetLen + sizeofLen > sizeof(readbuff)) {
 					return false;
 				}
 
-				if (dataSize >= packetLen + 2) {
-					dataSize -= (packetLen + 2);
-					readoffset += 2;
-					auto packet = Buffer::New(&readbuff[readoffset],packetLen);
+				if (dataSize >= packetLen + sizeofLen) {
+					dataSize -= (packetLen + sizeofLen);
+					readoffset += sizeofLen;
+					auto packet = Buffer::New(&readbuff[readoffset], packetLen);
 					readoffset += packetLen;
 					onPacket(packet);
 				}
@@ -54,14 +56,17 @@ namespace net {
 					if (e == WSAEWOULDBLOCK) {
 						sendqueue.push_front(buff);
 						break;
-					}else {
+					}
+					else {
 						mtx.unlock();
 						return false;
 					}
-				} else if (n < buff->Len()) {
+				}
+				else if (n < buff->Len()) {
 					sendqueue.push_front(Buffer::New(buff, n, buff->Len()));
 				}
-			} else {
+			}
+			else {
 				break;
 			}
 		}
@@ -69,7 +74,7 @@ namespace net {
 		return true;
 	}
 
-	bool NetClient::looponce(int ms){
+	bool NetClient::looponce(int ms) {
 		fd_set r_set;
 		fd_set w_set;
 		fd_set e_set;
