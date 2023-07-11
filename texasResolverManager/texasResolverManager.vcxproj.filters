@@ -10,10 +10,10 @@
     <ClCompile Include="rpipe.cpp">
       <Filter>source</Filter>
     </ClCompile>
-    <ClCompile Include="solverMgr.cpp">
+    <ClCompile Include="net.cpp">
       <Filter>source</Filter>
     </ClCompile>
-    <ClCompile Include="net.cpp">
+    <ClCompile Include="solverMgr.cpp">
       <Filter>source</Filter>
     </ClCompile>
   </ItemGroup>

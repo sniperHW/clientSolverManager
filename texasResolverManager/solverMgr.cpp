@@ -198,7 +198,7 @@ struct task {
     }
 };
 
-std::map<std::string, task*> taskMap;
+std::map<std::string, std::shared_ptr<task>> taskMap;
 std::mutex taskMapMtx;
 
 net::Buffer::Ptr makeHeartBeatPacket(const std::vector<TASKINFO> &tasks) {
@@ -233,7 +233,7 @@ net::Buffer::Ptr makeHeartBeatPacket(const std::vector<TASKINFO> &tasks) {
 }
 
 
-void commitTaskRoutine(task* task) {
+void commitTaskRoutine(const std::shared_ptr<task> &task) {
 
     //读取result文件
 
@@ -256,10 +256,7 @@ void commitTaskRoutine(task* task) {
         packet->Append(uint16_t(3));
         packet->Append(jStr);
 
-        //std::lock_guard<std::mutex> guard(task->mtx);
-
-        task->mtx.lock();
-
+        std::lock_guard<std::mutex> guard(task->mtx);
         //重复提交任务，直到接收到提交成功或任务取消
         for (;;) {
             g_netClient->Send(packet);
@@ -272,11 +269,6 @@ void commitTaskRoutine(task* task) {
                     tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
                 }
                 taskMapMtx.unlock();
-
-                task->mtx.unlock();
-
-                delete(task);
-
                 g_netClient->Send(makeHeartBeatPacket(tasks));
                 return;
             }
@@ -312,8 +304,8 @@ void TaskFinish(const string& sTaskID)
     task->mtx.unlock();
     
     //启动提交routine,
-    auto _ = std::thread(commitTaskRoutine,task);
-
+    auto t = std::thread(commitTaskRoutine,task);
+    t.detach();
 }
 
 void SetTaskFiniedCallback(FuncTaskFinish callback)
@@ -853,28 +845,12 @@ void onPacket(const net::Buffer::Ptr& packet) {
     case 2: {//CmdDispatchJob
             auto taskID = msg["TaskID"].get<std::string>();
             auto CfgPath = msg["TaskID"].get<std::string>();
-            auto ResultPath = msg["TaskID"].get<std::string>();
             taskMapMtx.lock();
             auto t = taskMap[msg["TaskID"].get<std::string>()];
             taskMapMtx.unlock();
             if (t != nullptr) {
                 return;
             }
-
-            //将cfg文件复制到本地，并做改写
-            /*bool ok = false;
-            auto c = 0;
-            for (; c < 3; c++) {
-                ok = copyCfgFile(CfgPath, taskID);
-                if (!ok) {
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
-                }
-            }
-
-            if (!ok) {
-                return;
-            }*/
-
 
             std::ofstream ofs;
             ofs.open(taskID, std::ios::out);
@@ -884,9 +860,8 @@ void onPacket(const net::Buffer::Ptr& packet) {
 
             toSolve(taskID, taskID);
             
-            t = new task();
+            t = std::shared_ptr<task>(new task());
             t->taskID = taskID;
-            //t->resultPath = ResultPath;
             t->state = taskRunning;
 
 
@@ -991,7 +966,8 @@ int  InitTaskShedule()
     }
 
     //启动心跳
-    auto _ = std::thread(heartbeatRoutine);
+    auto t = std::thread(heartbeatRoutine);
+    t.detach();
 
     return 0;
 }
