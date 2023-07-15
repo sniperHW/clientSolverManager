@@ -260,7 +260,7 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
         //重复提交任务，直到接收到提交成功或任务取消
         for (;;) {
             g_netClient->Send(packet);
-            task->cv.wait_for(task->mtx, chrono::seconds(1));//如果没有被唤醒，则等待一秒
+            task->cv.wait_for(task->mtx, chrono::seconds(5));//如果没有被唤醒，则等待一秒
             if (task->state == taskCancel || task->state == taskFinish) {
                 std::vector<TASKINFO> tasks;
                 taskMapMtx.lock();
@@ -931,7 +931,7 @@ void heartbeatRoutine() {
 
         g_netClient->Send(makeHeartBeatPacket(tasks));
 
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::seconds(10));
     }
 }
 
