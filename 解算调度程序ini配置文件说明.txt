@@ -1,0 +1,25 @@
+一·配置文件名
+resolvermanager.ini
+放在exe同级目录下
+
+二。调度程序模式配置
+ 调度程序有两种模式，允许一个进程或者两个运算进程同时运行
+  配置文件为在调度程序同级目录下的resolvermanager.ini文件中
+节[control], 
+字段processtype，值为1或者2，表示同时允许运行几个解算进程
+默认值为1
+示例如下：
+[control]
+processtype=1
+
+三。任务分发服务器的配置
+  配置任务分发和解算结果上传服务器(shedule.exe所在服务器）的配置
+节：
+[taskserver]
+字段：
+服务器的IP地址： IP 默认值127.0.0.1
+服务器的端口号:port,默认值为18889
+示例如下：
+[taskserver]
+IP =127.0.0.1
+Port = 18889
