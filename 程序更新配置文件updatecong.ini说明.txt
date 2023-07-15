@@ -1,0 +1,17 @@
+一，文件更新共享目录配置
+  1.文件更新的代码为resolverupdate项目
+  2.程序启动时读取当前目录下的配置文件updateConfig.ini，
+INI 文件的[updateserver]节中分别配置了共享路径sharePath，
+访问共享所用的账号username和密码password
+内容如下：
+[updateserver]
+sharePath = \\192.168.246.129\share
+username  =  charlord
+password = 123456
+3.更新程序会先把共享目录映射成本地Z:盘，
+4 .程序会比较z盘和当前目录中的version.ini文件的fileversion，
+如果当前目录version.ini不存在或者fileversion配置不一致，则把Z盘的文件包括子文件夹全部更新
+
+二。version.ini配置示例
+[version]
+fileversion = 1.0.0.0
