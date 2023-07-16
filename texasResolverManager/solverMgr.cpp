@@ -302,28 +302,32 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
 void TaskFinish(const string& sTaskID)
 {
     cout << "task finish callback " << sTaskID << endl;
-    taskMapMtx.lock();
-    auto task = taskMap[sTaskID];
-    taskMapMtx.unlock();
-    if (task == nullptr) {
-        //不应该发生
-        return;
-    }
 
-    task->mtx.lock();
-    if (task->state == taskRunning) {
-        task->state = taskWaitCommit;
-        task->mtx.unlock();
+    taskMapMtx.lock();
+    auto it = taskMap.find(sTaskID);
+    if (taskMap.end() == it) {
+        //不应该发生
+        taskMapMtx.unlock();
+        return;
     }
     else {
-        task->mtx.unlock();
-        return;
+        auto task = it->second;
+        taskMapMtx.unlock();
+
+        task->mtx.lock();
+        if (task->state == taskRunning) {
+            task->state = taskWaitCommit;
+            task->mtx.unlock();
+        }
+        else {
+            task->mtx.unlock();
+            return;
+        }
+
+        //启动提交routine,
+        auto t = std::thread(commitTaskRoutine, task);
+        t.detach();
     }
-    
-    
-    //启动提交routine,
-    auto t = std::thread(commitTaskRoutine,task);
-    t.detach();
 }
 
 void SetTaskFiniedCallback(FuncTaskFinish callback)
@@ -335,7 +339,7 @@ void SetTaskFiniedCallback(FuncTaskFinish callback)
 //接口：执行解算任务
 int toSolve(const string& sTaskID, const string& sConfigPath)
 {
-    if(false) {
+    if(true) {
         std::ofstream ofs;
         ofs.open(homepath+sTaskID+".json", std::ios::out);
         ofs << "hello";
@@ -882,11 +886,11 @@ void onPacket(const net::Buffer::Ptr& packet) {
             auto taskID = msg["TaskID"].get<std::string>();
             auto CfgPath = msg["TaskID"].get<std::string>();
             taskMapMtx.lock();
-            auto t = taskMap[msg["TaskID"].get<std::string>()];
-            taskMapMtx.unlock();
-            if (t != nullptr) {
+            if (taskMap.end() != taskMap.find(msg["TaskID"].get<std::string>())) {
+                taskMapMtx.unlock();
                 return;
             }
+            taskMapMtx.unlock();
 
             std::ofstream ofs;
             ofs.open(taskID, std::ios::out);
@@ -896,10 +900,10 @@ void onPacket(const net::Buffer::Ptr& packet) {
 
             toSolve(taskID,homepath + taskID);
             
-            t = std::shared_ptr<task>(new task());
+            
+            auto t = std::shared_ptr<task>(new task());
             t->taskID = taskID;
             t->state = taskRunning;
-
 
             std::vector<TASKINFO> tasks;
             taskMapMtx.lock();
@@ -913,12 +917,12 @@ void onPacket(const net::Buffer::Ptr& packet) {
         break;
     case 4://CmdAcceptJobResult = uint16(4)
     case 5: {//CmdCancelJob       = uint16(5)
-            
             auto taskID = msg["TaskID"].get<std::string>();                    
             taskMapMtx.lock();
-            auto task = taskMap[taskID];
+            auto it = taskMap.find(taskID);
             taskMapMtx.unlock();
-            if (task != nullptr) {
+            if (it != taskMap.end()) {
+            auto task = it->second;
                 if (cmd == 4) {
                     task->setStateAndNotify(taskFinish);
                 }
