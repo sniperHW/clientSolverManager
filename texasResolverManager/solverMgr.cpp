@@ -134,7 +134,7 @@ void getState(string& sComputerName, string& sIP, int& nMemSize, int& nErrorCode
     //    nMemAvail = _iMemAvail;
     //}
 
-    for (int i = 0; i < 2; i++)
+    for (int i = 0; i < g_dwResolverNum; i++)
     {
         _taskState.sCurTaskID = "";
         ZeroMemory(&_taskState, sizeof(_taskState));
@@ -321,7 +321,7 @@ int toSolve(const string& sTaskID, const string& sConfigPath)
     if (1 == g_dwResolverNum)
     {
         if (STATE_PROCESS_RUNNING == g_pipeMgr[0].GetState()
-             || STATE_PROCESS_RUNNING == g_pipeMgr[1].GetState())
+            /* || STATE_PROCESS_RUNNING == g_pipeMgr[1].GetState()*/)
         {
            :: printf(" one resolver allowed and there is one  resolvers   running already, \n");
             return  -1;
@@ -339,7 +339,7 @@ int toSolve(const string& sTaskID, const string& sConfigPath)
 
     for (int k = 0; k < 50; k++)
     {
-        for (int i = 0; i < 2; i++)
+        for (int i = 0; i < g_dwResolverNum; i++)
         {
             if (STATE_PROCESS_READY == g_pipeMgr[i].GetState())
             {
@@ -1027,9 +1027,11 @@ int main(int argc,char **argv)
     g_pipeMgr[0].SetExePath(sExe1);
     g_pipeMgr[0].Start(1);
 
-    g_pipeMgr[1].SetExePath(sExe1);
-    g_pipeMgr[1].Start(2);
-
+    if (2 == g_dwResolverNum)
+    {
+        g_pipeMgr[1].SetExePath(sExe1);
+        g_pipeMgr[1].Start(2);
+    }
 
     int ch = 0;
     BOOL bRun = TRUE;
@@ -1043,8 +1045,10 @@ int main(int argc,char **argv)
 
         ::printf(" InitTaskShedule failed \n");
         g_pipeMgr[0].Stop();
-        g_pipeMgr[1].Stop();
-
+        if (2 == g_dwResolverNum)
+        {
+            g_pipeMgr[1].Stop();
+        }
         g_netClient = nullptr;
 
         ::WSACleanup();
@@ -1198,8 +1202,10 @@ int main(int argc,char **argv)
 
 
     g_pipeMgr[0].Stop();
-    g_pipeMgr[1].Stop();
-
+    if (2 == g_dwResolverNum)
+    {
+        g_pipeMgr[1].Stop();
+    }
     g_netClient = nullptr;
 
     ::WSACleanup();
