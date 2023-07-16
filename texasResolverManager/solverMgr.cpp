@@ -12,6 +12,7 @@
 
 #include <mutex>
 #include <condition_variable>
+#include <cstdio>
 
 //namespace fs = std::filesystem;
 
@@ -30,6 +31,8 @@ using json = nlohmann::json;
 #define  VOL_SHARE_UPDATE "X:"
 
 #define  VOL_SHARE_UPLOAD "Z:"
+
+std::string homepath;
 
 typedef struct _TASKINFO
 {
@@ -237,13 +240,15 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
 
     //读取result文件
 
-    if (std::ifstream is{ task->taskID + ".json", std::ios::binary | std::ios::ate}) {
+    if (std::ifstream is{ homepath + task->taskID + ".json", std::ios::binary | std::ios::ate}) {
         auto size = is.tellg();
         std::string str(size, '\0'); // construct string to stream size
         is.seekg(0);
         if (is.read(&str[0], size))
             std::cout << str << '\n';
-    
+
+
+        is.close();
     
         json j;
         j["TaskID"] = task->taskID;
@@ -270,6 +275,11 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
                 }
                 taskMapMtx.unlock();
                 g_netClient->Send(makeHeartBeatPacket(tasks));
+
+                //临时删除配置文件和输出文件
+                ::remove(std::string(homepath + task->taskID).c_str());
+                ::remove(std::string(homepath + task->taskID + ".json").c_str());
+
                 return;
             }
         }
@@ -858,7 +868,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
             ofs.close();
 
 
-            toSolve(taskID, taskID);
+            toSolve(taskID,homepath + taskID);
             
             t = std::shared_ptr<task>(new task());
             t->taskID = taskID;
@@ -988,6 +998,9 @@ int main(int argc,char **argv)
     GetSytemInfo();
 
     std::string sPath = GetCurrentPath();
+
+    homepath = sPath;
+
     ::printf("current path is :%s \n", sPath.c_str());
 
     //测试时先注释掉
