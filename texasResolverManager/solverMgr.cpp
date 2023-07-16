@@ -12,6 +12,7 @@
 
 #include <mutex>
 #include <condition_variable>
+#include <random>
 
 //namespace fs = std::filesystem;
 
@@ -26,6 +27,7 @@
 
 using namespace std;
 using json = nlohmann::json;
+default_random_engine e;
 
 #define  VOL_SHARE_UPDATE "X:"
 
@@ -272,8 +274,8 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
                 for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
                     tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
                 }
-                taskMapMtx.unlock();
                 g_netClient->Send(makeHeartBeatPacket(tasks));
+                taskMapMtx.unlock();
 
                 //删除本地文件
                 filesystem::remove(homepath + task->taskID); //cfg文件
@@ -283,6 +285,10 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
             }
         }
     }
+    else {
+        std::cout << task->taskID << "result file not found" << std::endl;
+    }
+
 
 }
 
@@ -305,12 +311,13 @@ void TaskFinish(const string& sTaskID)
     task->mtx.lock();
     if (task->state == taskRunning) {
         task->state = taskWaitCommit;
+        task->mtx.unlock();
     }
     else {
         task->mtx.unlock();
         return;
     }
-    task->mtx.unlock();
+    
     
     //启动提交routine,
     auto t = std::thread(commitTaskRoutine,task);
@@ -326,6 +333,24 @@ void SetTaskFiniedCallback(FuncTaskFinish callback)
 //接口：执行解算任务
 int toSolve(const string& sTaskID, const string& sConfigPath)
 {
+    if(false) {
+        std::ofstream ofs;
+        ofs.open(homepath+sTaskID+".json", std::ios::out);
+        ofs << "hello";
+        ofs.close();
+
+        auto tt = std::thread([sTaskID]() {
+            auto n = e() % 5 + 1;
+            std::cout << "sleep " << n << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(n));
+            TaskFinish(sTaskID);
+            });
+        tt.detach();
+
+
+        return 0;
+    }
+
     //如果已经有任务在执行，返回
     if (1 == g_dwResolverNum)
     {
@@ -880,8 +905,8 @@ void onPacket(const net::Buffer::Ptr& packet) {
             for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
                 tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
             }
-            taskMapMtx.unlock();
             g_netClient->Send(makeHeartBeatPacket(tasks));
+            taskMapMtx.unlock();
         }
         break;
     case 4://CmdAcceptJobResult = uint16(4)
@@ -930,9 +955,8 @@ void heartbeatRoutine() {
             tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
         }
 
-        taskMapMtx.unlock();
-
         g_netClient->Send(makeHeartBeatPacket(tasks));
+        taskMapMtx.unlock();
 
         std::this_thread::sleep_for(std::chrono::seconds(10));
     }
