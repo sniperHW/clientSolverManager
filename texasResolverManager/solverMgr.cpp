@@ -246,7 +246,9 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
         std::string str(size, '\0'); // construct string to stream size
         is.seekg(0);
         if (is.read(&str[0], size))
-            std::cout << str << '\n';
+            std::cout << "read result ok" << std::endl;
+        else
+            std::cout << "read result failed" << std::endl;
 
 
         is.close();
