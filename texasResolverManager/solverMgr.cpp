@@ -12,7 +12,6 @@
 
 #include <mutex>
 #include <condition_variable>
-#include <cstdio>
 
 //namespace fs = std::filesystem;
 
@@ -276,9 +275,9 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
                 taskMapMtx.unlock();
                 g_netClient->Send(makeHeartBeatPacket(tasks));
 
-                //临时删除配置文件和输出文件
-                ::remove(std::string(homepath + task->taskID).c_str());
-                ::remove(std::string(homepath + task->taskID + ".json").c_str());
+                //删除本地文件
+                filesystem::remove(homepath + task->taskID); //cfg文件
+                std::filesystem::remove(homepath + task->taskID + ".json");//结果文件
 
                 return;
             }
@@ -888,13 +887,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
     case 4://CmdAcceptJobResult = uint16(4)
     case 5: {//CmdCancelJob       = uint16(5)
             
-
-            auto taskID = msg["TaskID"].get<std::string>();
-            
-            //删除本地文件
-            filesystem::remove(taskID); //cfg文件
-            std::filesystem::remove(taskID+".json");//结果文件
-                    
+            auto taskID = msg["TaskID"].get<std::string>();                    
             taskMapMtx.lock();
             auto task = taskMap[taskID];
             taskMapMtx.unlock();
