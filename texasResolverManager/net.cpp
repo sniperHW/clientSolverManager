@@ -1,5 +1,6 @@
 #include "net.h"
 #include <chrono>
+#include <iostream>
 
 namespace net {
 
@@ -11,7 +12,8 @@ namespace net {
 	bool NetClient::onRead() {
 		const int sizeofLen = sizeof(uint32_t);
 
-		int n = ::recv(socket, &readbuff[readoffset], sizeof(readbuff) - readoffset, 0);
+		int n = ::recv(socket, &readbuff[w], sizeof(readbuff) - w, 0);
+		//std::cout << "recv:" << n << std::endl;
 		if (n == SOCKET_ERROR) {
 			auto e = WSAGetLastError();
 			if (e != WSAEWOULDBLOCK) {
@@ -19,23 +21,30 @@ namespace net {
 			}
 		}
 		else {
-			dataSize += n;
-			for (; dataSize >= sizeofLen;) {
-				auto packetLen = (int)::ntohl(*reinterpret_cast<uint32_t*>(&readbuff[readoffset]));
+			w += n;
+			for(;r + sizeofLen  <= w;) {
+				auto dataSize = w - r;
+				auto packetLen = (int)::ntohl(*reinterpret_cast<uint32_t*>(&readbuff[r]));
 				if (packetLen + sizeofLen > sizeof(readbuff)) {
 					return false;
 				}
 
 				if (dataSize >= packetLen + sizeofLen) {
-					dataSize -= (packetLen + sizeofLen);
-					readoffset += sizeofLen;
-					auto packet = Buffer::New(&readbuff[readoffset], packetLen);
-					readoffset += packetLen;
+					r += sizeofLen;
+					auto packet = Buffer::New(&readbuff[r], packetLen);
+					r += packetLen;
 					onPacket(packet);
+					if (r >= w) {
+						r = w = 0;
+					}
 				}
 				else {
-					::memmove(&readbuff[0], &readbuff[readoffset], dataSize);
-					readoffset = 0;
+					std::cout << "data not enough:" << packetLen << "," << dataSize << std::endl;
+					if (r > 0) {
+						::memmove(&readbuff[0], &readbuff[r], dataSize);
+						r = 0;
+						w = dataSize;
+					}
 					break;
 				}
 			}

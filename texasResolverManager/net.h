@@ -49,7 +49,7 @@ namespace net {
 
 	private:
 
-		NetClient(struct sockaddr_in addr, SOCKET socket):serverAddr(addr),socket(socket),readoffset(0),dataSize(0),die(false) {}
+		NetClient(struct sockaddr_in addr, SOCKET socket):serverAddr(addr),socket(socket),w(0),r(0),die(false) {}
 
 		void start(const std::function<void(const Buffer::Ptr&)> &onPacket);
 		static void loop(NetClient *c);
@@ -88,8 +88,10 @@ namespace net {
 		std::thread        thread;
 		std::function<void(const Buffer::Ptr&)> onPacket;
 		char  readbuff[1024*64];
-		int   readoffset;
-		int   dataSize;
+		int   w;
+		int   r;
+		//int   readoffset;
+		//int   dataSize;
 		std::atomic_bool die;
 
 	};
