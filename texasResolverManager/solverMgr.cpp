@@ -13,6 +13,18 @@
 #include <mutex>
 #include <condition_variable>
 #include <random>
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/filter/gzip.hpp>
+#include <boost/iostreams/device/back_inserter.hpp>
+#include <boost/archive/iterators/base64_from_binary.hpp>
+#include <boost/archive/iterators/binary_from_base64.hpp>
+#include <boost/archive/iterators/transform_width.hpp>
+
+
+#include <vector>
+#include <sstream>
+#include <iostream>
+#include <string>
 
 //namespace fs = std::filesystem;
 
@@ -75,6 +87,78 @@ int g_nErrorCode = 0;
 string g_sComputerName;
 string g_sLocalIP;
 DWORD g_dwMemSize = 0;
+
+//压缩相关
+void compress2(std::vector<char>& in, std::vector<char>& out);
+void compress(const char* buffer, size_t buffer_size, std::vector<char>& out)
+{
+    std::vector<char> in;
+    in.assign(buffer, buffer + buffer_size);
+
+    compress2(in, out);
+}
+
+void compress2(std::vector<char>& in, std::vector<char>& out)
+{
+    using namespace boost::iostreams;
+    filtering_ostream fos;    // 具有filter功能的输出流
+    fos.push(gzip_compressor(gzip_params(gzip::best_compression)));  // gzip压缩功能
+    fos.push(boost::iostreams::back_inserter(out));     // 输出流的数据的目的地
+    fos.write((const char*)(in.data()), in.size());
+    boost::iostreams::close(fos);  // flush. 此函数调用后,存储的是gzip压缩后的数据
+}
+
+
+void decompress(std::vector<char>& in, std::vector<char>& out)
+{
+    using namespace boost::iostreams;
+    filtering_ostream fos;
+    fos.push(gzip_decompressor());  // gzip解压缩功能
+    fos.push(boost::iostreams::back_inserter(out)); // 存放流的数据的目的地
+    fos.write((const char*)(in.data()), in.size()); // 把压缩的数据写入流
+    boost::iostreams::close(fos); // flush. 
+}
+
+
+using namespace boost::archive::iterators;
+
+bool Base64Encode(string* outPut, const string& inPut)
+{
+    typedef base64_from_binary<transform_width<string::const_iterator, 6, 8>> Base64EncodeIter;
+
+    stringstream  result;
+    copy(Base64EncodeIter(inPut.begin()),
+        Base64EncodeIter(inPut.end()),
+        ostream_iterator<char>(result));
+
+    size_t Num = (3 - inPut.length() % 3) % 3;
+    for (size_t i = 0; i < Num; i++)
+    {
+        result.put('=');
+    }
+    *outPut = result.str();
+    return outPut->empty() == false;
+}
+
+bool Base64Decode(string* outPut, const string& inPut)
+{
+    typedef transform_width<binary_from_base64<string::const_iterator>, 8, 6> Base64DecodeIter;
+
+    stringstream result;
+    try
+    {
+        copy(Base64DecodeIter(inPut.begin()),
+            Base64DecodeIter(inPut.end()),
+            ostream_iterator<char>(result));
+    }
+    catch (...)
+    {
+        return false;
+    }
+    *outPut = result.str();
+    return outPut->empty() == false;
+}
+
 
 
 void GetSytemInfo()
@@ -179,13 +263,13 @@ struct task {
     std::mutex  mtx;
     std::condition_variable_any cv;
     std::string taskID;
-    //std::string resultPath;
+    bool        compress;          //是否压缩
     taskState   state;
     int         nContinuedSeconds; //单位，毫秒
     int         nIterationNum;
     double      dExploit;
 
-    task():nContinuedSeconds(0), nIterationNum(0), dExploit(0) {
+    task():compress(false),nContinuedSeconds(0), nIterationNum(0), dExploit(0) {
 
     }
 
@@ -252,6 +336,15 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
 
 
         is.close();
+
+        if (task->compress) {
+            std::vector<char> compressed;
+            compress(str.c_str(), str.length(), compressed);
+            string s2;
+            s2.assign((const char*)compressed.data(), compressed.size());
+            Base64Encode(&str, s2);
+        }
+
     
         json j;
         j["TaskID"] = task->taskID;
@@ -906,6 +999,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
             auto t = std::shared_ptr<task>(new task());
             t->taskID = taskID;
             t->state = taskRunning;
+            t->compress = msg["Compress"].get<int>() == 1;
 
             std::vector<TASKINFO> tasks;
             taskMapMtx.lock();
