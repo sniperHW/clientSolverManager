@@ -71,10 +71,15 @@ int InitMemshare()
         CloseMemshare();
     }
     string strDic = GetCurrentPath();
-    strDic += "card5_dic_sorted.txt";
+    strDic += "resources\\compairer\\card5_dic_sorted.txt";
     std::ifstream infile;
     std::string sLine;
     infile.open(strDic.c_str(), std::ios::in);
+    if (!infile.is_open())
+    {
+        ::printf(" open memshare dictionary file failed:%d\n", GetLastError());
+        return -11;
+    }
     DWORD dwTime = GetTickCount();
 //内存映射文件
   //  FILE_MAP_ALL_ACCESS
