@@ -24,9 +24,6 @@
     <ClInclude Include="Card.h">
       <Filter>header</Filter>
     </ClInclude>
-    <ClInclude Include="global.h">
-      <Filter>header</Filter>
-    </ClInclude>
     <ClInclude Include="json.hpp">
       <Filter>source</Filter>
     </ClInclude>

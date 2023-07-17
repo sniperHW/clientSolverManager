@@ -145,7 +145,6 @@
     <ClInclude Include="json.hpp" />
     <ClInclude Include="net.h" />
     <ClInclude Include="Card.h" />
-    <ClInclude Include="global.h" />
     <ClInclude Include="memshare.h" />
     <ClInclude Include="rpipe.h" />
   </ItemGroup>
