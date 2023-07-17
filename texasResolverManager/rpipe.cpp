@@ -517,18 +517,29 @@ int  CResolverPipe::runTask( string strTaskID, string stringConfigFile)
     if (m_dwProcessState != STATE_PROCESS_READY)
     {
         printf(TEXT(" runTask Process Not Ready--state:%d--process:%d\n"), m_dwProcessState, m_dwProcessIndex);
+        return -1;
     }
     m_stringConfigFile = stringConfigFile;
-    m_strTaskID = strTaskID;
-    ZeroMemory(&pipeTask, sizeof(pipeTask));
+      ZeroMemory(&pipeTask, sizeof(pipeTask));
     pipeTask.dwMsgType = PIPEMSG_NOTIFYTASK;
     strcpy_s(pipeTask.strTaskID, 256, strTaskID.c_str());
     strcpy_s(pipeTask.strConfigPath, 256, stringConfigFile.c_str());
     m_bNeedReRuntask = true;
     int iRet = writePipe( (char*)&pipeTask, sizeof(pipeTask));
+    if (0 != iRet)
+    {
+        printf("  send task to pipe failed process:%d -- %s\n", 
+            m_dwProcessIndex, strTaskID.c_str());
+        return -2;
+    }
+    else
+    {
+        m_strTaskID = strTaskID;
+        m_dwProcessState = STATE_PROCESS_SENDTASK;
+    }
     m_dwStartTick = GetTickCount();
 
-    return iRet;
+    return 0;
 }
 
 int  CResolverPipe::ReRunTask()
