@@ -87,7 +87,7 @@ public:
 	};
 	DWORD GetConitunedSeconds()
 	{
-		if (STATE_PROCESS_RUNNING == m_dwProcessState)
+		if (STATE_PROCESS_RUNNING  != m_dwProcessState)
 		{
 			return m_dwFinishedSeconds;
 		}
