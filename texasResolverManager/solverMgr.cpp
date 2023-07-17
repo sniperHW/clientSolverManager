@@ -432,7 +432,8 @@ void SetTaskFiniedCallback(FuncTaskFinish callback)
 //接口：执行解算任务
 int toSolve(const string& sTaskID, const string& sConfigPath)
 {
-
+    int iRet = -2;
+    //static volatile DWORD sl_dwLastRunTask = 0;
     /*if (true) {
         std::ofstream ofs;
         ofs.open(homepath + sTaskID + ".json", std::ios::out);
@@ -478,13 +479,20 @@ int toSolve(const string& sTaskID, const string& sConfigPath)
         {
             if (STATE_PROCESS_READY == g_pipeMgr[i].GetState())
             {
-                g_pipeMgr[i].runTask(sTaskID, sConfigPath);
-                return 0;
+                iRet = g_pipeMgr[i].runTask(sTaskID, sConfigPath);
+                if (0 == iRet)
+                {
+                   return 0;
+                }
+                else
+                {
+                    :: printf(" runTask failed process: %d task :%s \n",i ,sTaskID.c_str());
+                    continue;
+                }
             }
         }
         Sleep(1000);
-       :: printf(" wait for process ready : %d seonds--of total 50 seconds \n",k);
-    }
+      }
    :: printf(" new task  no ready process \n");
     return -2;
 }

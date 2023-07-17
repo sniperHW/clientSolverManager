@@ -107,7 +107,9 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+
       <AdditionalIncludeDirectories>$(SolutionDir)boost\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -126,7 +128,9 @@
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions);_WINSOCK_DEPRECATED_NO_WARNINGS</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
+
       <AdditionalIncludeDirectories>$(SolutionDir)boost\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
