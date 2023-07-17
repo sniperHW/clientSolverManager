@@ -107,7 +107,6 @@ namespace net {
 		int n = ::select(0, &r_set, &w_set, &e_set, &timeout);
 		if (n > 0)
 		{
-			auto ok = true;
 			if (FD_ISSET(socket, &e_set) || FD_ISSET(socket, &r_set)) {
 				ok = onRead();
 			}
@@ -126,17 +125,26 @@ namespace net {
 		for (; c->die.load() == false;) {
 			auto ok = c->looponce(1);
 			if (!ok) {
-				::closesocket(c->socket);
+				std::cout << "connection lose" << std::endl;
+				::closesocket(c->socket); 
 				for (; c->die.load() == false;) {
+					std::cout << "connect ..." << std::endl;
 					auto s = c->connect(&c->serverAddr);
 					if (s == INVALID_SOCKET) {
 						std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 					}
 					else {
+						std::cout << "connect ok" << std::endl;
 						c->socket = s;
 						c->mtx.lock();
 						c->sendqueue.clear();
 						c->mtx.unlock();
+
+						if (c->onReconnectOK != nullptr) {
+							c->onReconnectOK();
+						}
+
+						break;
 					}
 				}
 			}

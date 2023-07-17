@@ -339,6 +339,26 @@ void SetTaskFiniedCallback(FuncTaskFinish callback)
 //接口：执行解算任务
 int toSolve(const string& sTaskID, const string& sConfigPath)
 {
+
+    /*if (true) {
+        std::ofstream ofs;
+        ofs.open(homepath + sTaskID + ".json", std::ios::out);
+        ofs << "hello";
+        ofs.close();
+
+        auto tt = std::thread([sTaskID]() {
+            auto n = e() % 3 + 1;
+            std::cout << "sleep " << n << std::endl;
+            std::this_thread::sleep_for(std::chrono::seconds(n));
+            TaskFinish(sTaskID);
+            });
+        tt.detach();
+
+
+        return 0;
+    }*/
+
+
     //如果已经有任务在执行，返回
     if (1 == g_dwResolverNum)
     {
@@ -950,6 +970,18 @@ void heartbeatRoutine() {
     }
 }
 
+
+void onReconnectOK() {
+    //重连成功，马上发送一个心跳包
+    vector<TASKINFO> tasks;
+    taskMapMtx.lock();
+    for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
+        tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
+    }
+    g_netClient->Send(makeHeartBeatPacket(tasks));
+    taskMapMtx.unlock();
+}
+
 int  InitTaskShedule()
 {
     char serverIp[64] = { 0 };
@@ -971,7 +1003,7 @@ int  InitTaskShedule()
 
     //先连接上服务器
     for (;;) {
-        g_netClient = net::NetClient::New(serverIp, serverPort, onPacket);
+        g_netClient = net::NetClient::New(serverIp, serverPort, onPacket, onReconnectOK);
         if (g_netClient != nullptr) {
             break;
         }

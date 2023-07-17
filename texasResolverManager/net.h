@@ -16,7 +16,7 @@ namespace net {
 	public:
 		typedef std::shared_ptr<NetClient> Ptr;
 
-		static NetClient::Ptr New(const std::string &ip,uint32_t port, const std::function<void(const Buffer::Ptr&)> onPacket) {
+		static NetClient::Ptr New(const std::string &ip,uint32_t port, const std::function<void(const Buffer::Ptr&)> onPacket, const std::function<void()>& onReconnectOK) {
 			struct sockaddr_in addr;
 			addr.sin_family = AF_INET;
 			addr.sin_port = htons((u_short)port);
@@ -28,6 +28,7 @@ namespace net {
 			}
 			else {
 				auto ptr = Ptr(new NetClient(addr, sock));
+				ptr->onReconnectOK = onReconnectOK;
 				ptr->start(onPacket);
 				return ptr;
 			}
@@ -40,6 +41,10 @@ namespace net {
 			sendqueue.push_back(buff);
 			mtx.unlock();
 		}
+
+		//void SetOnReconnectOK(const std::function<void()> &onReconnectOK) {
+		//	this->onReconnectOK = onReconnectOK;
+		//}
 
 		~NetClient() {
 			::closesocket(socket);
@@ -93,6 +98,7 @@ namespace net {
 		//int   readoffset;
 		//int   dataSize;
 		std::atomic_bool die;
+		std::function<void()> onReconnectOK;
 
 	};
 }
