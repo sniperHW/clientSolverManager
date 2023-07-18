@@ -15,10 +15,13 @@
 #include <random>
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
+#include <boost/iostreams/filter/bzip2.hpp>
+#include <boost/iostreams/filter/lzma.hpp>
 #include <boost/iostreams/device/back_inserter.hpp>
-#include <boost/archive/iterators/base64_from_binary.hpp>
-#include <boost/archive/iterators/binary_from_base64.hpp>
-#include <boost/archive/iterators/transform_width.hpp>
+#include <boost/beast/core/detail/base64.hpp>
+//#include <boost/archive/iterators/base64_from_binary.hpp>
+//#include <boost/archive/iterators/binary_from_base64.hpp>
+//#include <boost/archive/iterators/transform_width.hpp>
 
 
 #include <vector>
@@ -89,76 +92,26 @@ string g_sLocalIP;
 DWORD g_dwMemSize = 0;
 
 //压缩相关
-void compress2(std::vector<char>& in, std::vector<char>& out);
-void compress(const char* buffer, size_t buffer_size, std::vector<char>& out)
-{
-    std::vector<char> in;
-    in.assign(buffer, buffer + buffer_size);
-
-    compress2(in, out);
-}
-
-void compress2(std::vector<char>& in, std::vector<char>& out)
+void compress(const string& in, std::vector<char>& out)
 {
     using namespace boost::iostreams;
     filtering_ostream fos;    // 具有filter功能的输出流
-    fos.push(gzip_compressor(gzip_params(gzip::best_compression)));  // gzip压缩功能
+    //fos.push(bzip2_compressor());// gzip_compressor(gzip_params(gzip::best_compression)));  // gzip压缩功能
+    fos.push(lzma_compressor(lzma_params(lzma::best_compression)));
     fos.push(boost::iostreams::back_inserter(out));     // 输出流的数据的目的地
-    fos.write((const char*)(in.data()), in.size());
+    fos.write((const char*)(in.c_str()), in.length());
     boost::iostreams::close(fos);  // flush. 此函数调用后,存储的是gzip压缩后的数据
 }
 
-
-void decompress(const string& in, std::vector<char>& out)
+// 编码
+bool Base64Encode(const string& input, string& output)
 {
-    using namespace boost::iostreams;
-    filtering_ostream fos;
-    fos.push(gzip_decompressor());  // gzip解压缩功能
-    fos.push(boost::iostreams::back_inserter(out)); // 存放流的数据的目的地
-    fos.write((const char*)(in.c_str()), in.length()); // 把压缩的数据写入流
-    boost::iostreams::close(fos); // flush. 
+    std::size_t len = input.size();
+    output.resize(boost::beast::detail::base64::encoded_size(len));
+    output.resize(boost::beast::detail::base64::encode(&output[0], input.c_str(), len));
+
+    return true;
 }
-
-
-using namespace boost::archive::iterators;
-
-bool Base64Encode(string* outPut, const string& inPut)
-{
-    typedef base64_from_binary<transform_width<string::const_iterator, 6, 8>> Base64EncodeIter;
-
-    stringstream  result;
-    copy(Base64EncodeIter(inPut.begin()),
-        Base64EncodeIter(inPut.end()),
-        ostream_iterator<char>(result));
-
-    size_t Num = (3 - inPut.length() % 3) % 3;
-    for (size_t i = 0; i < Num; i++)
-    {
-        result.put('=');
-    }
-    *outPut = result.str();
-    return outPut->empty() == false;
-}
-
-bool Base64Decode(string* outPut, const string& inPut)
-{
-    typedef transform_width<binary_from_base64<string::const_iterator>, 8, 6> Base64DecodeIter;
-
-    stringstream result;
-    try
-    {
-        copy(Base64DecodeIter(inPut.begin()),
-            Base64DecodeIter(inPut.end()),
-            ostream_iterator<char>(result));
-    }
-    catch (...)
-    {
-        return false;
-    }
-    *outPut = result.str();
-    return outPut->empty() == false;
-}
-
 
 
 void GetSytemInfo()
@@ -339,10 +292,10 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
 
         if (task->compress) {
             std::vector<char> compressed;
-            compress(str.c_str(), str.length(), compressed);
+            compress(str, compressed);
             string s2;
             s2.assign((const char*)compressed.data(), compressed.size());
-            Base64Encode(&str, s2);
+            Base64Encode(s2,str);
         }
 
     
