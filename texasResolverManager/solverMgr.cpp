@@ -109,13 +109,13 @@ void compress2(std::vector<char>& in, std::vector<char>& out)
 }
 
 
-void decompress(std::vector<char>& in, std::vector<char>& out)
+void decompress(const string& in, std::vector<char>& out)
 {
     using namespace boost::iostreams;
     filtering_ostream fos;
     fos.push(gzip_decompressor());  // gzip解压缩功能
     fos.push(boost::iostreams::back_inserter(out)); // 存放流的数据的目的地
-    fos.write((const char*)(in.data()), in.size()); // 把压缩的数据写入流
+    fos.write((const char*)(in.c_str()), in.length()); // 把压缩的数据写入流
     boost::iostreams::close(fos); // flush. 
 }
 
