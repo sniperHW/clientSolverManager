@@ -92,9 +92,22 @@ string g_sLocalIP;
 DWORD g_dwMemSize = 0;
 DWORD g_processorCount = 0;
 int   g_pauseFlag = 0;
+HANDLE g_hEvent_PauseSolver = INVALID_HANDLE_VALUE;
+
 //DWORD g_corePerProcessor = 0;
 
 //压缩相关
+BOOL InitSolverPauseEvent()
+{
+    g_hEvent_PauseSolver = CreateEventA(NULL,TRUE,FALSE,"Global\\EVENT_RESOLVER_PAUSE");
+    if (INVALID_HANDLE_VALUE == g_hEvent_PauseSolver)
+    {
+        printf(" error --create resolver pause event failed:%d\n",
+            GetLastError());
+        return FALSE;
+    }
+    return TRUE;
+}
 void compress(const string& in, std::vector<char>& out)
 {
     using namespace boost::iostreams;
@@ -945,7 +958,19 @@ bool copyCfgFile(const std::string& path, const std::string& taskID) {
 
 //pauseFlag发生变更后调用
 void onPauseFlagChange() {
-
+    if (INVALID_HANDLE_VALUE != g_hEvent_PauseSolver)
+    {
+        if (1 == g_pauseFlag)
+        {
+            printf(" **** pause resolver\n");
+            SetEvent(g_hEvent_PauseSolver);
+        }
+        else
+        {
+            ResetEvent(g_hEvent_PauseSolver);
+            printf("***restart  solver\n");
+        }
+    }
 }
 
 void onPacket(const net::Buffer::Ptr& packet) {
@@ -1126,6 +1151,13 @@ int main(int argc,char **argv)
     //    g_nErrorCode = ERROR_INITSHAREPATH_FAILED;
     //}
 
+    if (FALSE == InitSolverPauseEvent())
+    {
+        printf(" error and exit-- InitSolverPauseEvent failed:%d \n"
+            , GetLastError());
+        return -2;
+
+    }
 
     if (0 != InitMemshare())
     {
