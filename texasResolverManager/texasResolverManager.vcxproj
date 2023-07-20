@@ -144,7 +144,7 @@
       <EnableUAC>true</EnableUAC>
       <UACUIAccess>false</UACUIAccess>
       <AdditionalLibraryDirectories>$(SolutionDir)boost\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>boost_iostreams-vc140-mt.lib;zlib.lib;bz2.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>boost_iostreams-vc140-mt.lib;zlib.lib;bz2.lib;lzma.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

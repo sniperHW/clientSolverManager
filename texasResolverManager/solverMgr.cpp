@@ -90,6 +90,9 @@ int g_nErrorCode = 0;
 string g_sComputerName;
 string g_sLocalIP;
 DWORD g_dwMemSize = 0;
+DWORD g_processorCount = 0;
+int   g_pauseFlag = 0;
+//DWORD g_corePerProcessor = 0;
 
 //压缩相关
 void compress(const string& in, std::vector<char>& out)
@@ -158,6 +161,15 @@ void GetSytemInfo()
         g_sLocalIP.append(strIP);
     }
    :: printf(" local ip:%s \n", g_sLocalIP.c_str());
+
+
+   SYSTEM_INFO sysInfo;
+   GetSystemInfo(&sysInfo);
+
+   g_processorCount = sysInfo.dwNumberOfProcessors;
+   //g_corePerProcessor = sysInfo.dwNumberOfProcessors / sysInfo.dw;
+
+   std::cout << "processorcount" << g_processorCount << std::endl;
 }
 
 //接口：获取状态信息，nErrorCode非0代表该客户端处于不可用状态，不能分配任务，
@@ -246,6 +258,7 @@ net::Buffer::Ptr makeHeartBeatPacket(const std::vector<TASKINFO> &tasks) {
     json j;
     j["WorkerID"] = g_sLocalIP;
     j["Memory"]   = g_dwMemSize / 1024;
+    j["ThreadCount"] = g_processorCount;
     auto Tasks = json::array();
 
     for (auto it = tasks.begin(); it != tasks.end(); it++) {
@@ -930,6 +943,10 @@ bool copyCfgFile(const std::string& path, const std::string& taskID) {
     return true;
 }*/
 
+//pauseFlag发生变更后调用
+void onPauseFlagChange() {
+
+}
 
 void onPacket(const net::Buffer::Ptr& packet) {
     auto rawBuf = packet->BuffPtr();
@@ -989,6 +1006,12 @@ void onPacket(const net::Buffer::Ptr& packet) {
             }
         }
         break;
+    case 6:
+        auto flag = msg["Pause"].get<int>();
+        if (flag != g_pauseFlag) {
+            g_pauseFlag = flag;
+            onPauseFlagChange();
+        }
     }
 }
 
