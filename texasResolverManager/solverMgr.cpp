@@ -973,6 +973,15 @@ void onPauseFlagChange() {
     }
 }
 
+void onReboot() {
+    std::cout << "onRebot" << std::endl;
+    RebootCopmuter();
+}
+
+void onShutdown() {
+    std::cout << "onShutdown" << std::endl;
+}
+
 void onPacket(const net::Buffer::Ptr& packet) {
     auto rawBuf = packet->BuffPtr();
     auto cmd = ::ntohs(*(uint16_t*)rawBuf);
@@ -1012,8 +1021,8 @@ void onPacket(const net::Buffer::Ptr& packet) {
             }
             g_netClient->Send(makeHeartBeatPacket(tasks));
             taskMapMtx.unlock();
-        }
-        break;
+    }
+    break;
     case 4://CmdAcceptJobResult = uint16(4)
     case 5: {//CmdCancelJob       = uint16(5)
             auto taskID = msg["TaskID"].get<std::string>();                    
@@ -1029,14 +1038,27 @@ void onPacket(const net::Buffer::Ptr& packet) {
                     task->setStateAndNotify(taskCancel);
                 }
             }
-        }
-        break;
-    case 6:
+    }
+    break;
+    case 6: {
         auto flag = msg["Pause"].get<int>();
         if (flag != g_pauseFlag) {
             g_pauseFlag = flag;
             onPauseFlagChange();
         }
+    }
+    break;
+    case 7:
+    {
+        onReboot();
+    }   
+    break;
+    case 8:
+    {
+        onShutdown();
+    }   
+    break;
+
     }
 }
 
