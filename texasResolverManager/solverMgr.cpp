@@ -552,6 +552,31 @@ BOOL  RebootCopmuter()
     return bRet;
 }
 
+BOOL ShutdownComputer()
+{
+    HANDLE hToken;
+    BOOL bRet = OpenProcessToken(GetCurrentProcess(), TOKEN_ALL_ACCESS, &hToken);
+    bRet = SetPrivilege(hToken, SE_SHUTDOWN_NAME, TRUE);
+    if (!bRet)
+    {
+        ::printf(" set Privilege failed \n");
+        return FALSE;
+    }
+
+    bRet = ExitWindowsEx(EWX_SHUTDOWN | /*EWX_FORCEIFHUNG*/EWX_FORCE, SHTDN_REASON_MAJOR_OTHER);
+    //char cshutdownMsg[] = "shutdown by resolver manager";
+    //bRet = InitiateSystemShutdownExA(NULL,&cshutdownMsg[0], 10, TRUE, TRUE, SHTDN_REASON_MAJOR_OTHER);
+    if (FALSE == bRet)
+    {
+        ::printf(" shutdown failed\n");
+    }
+    else
+    {
+        ::printf(" shutdown ...\n");
+    }
+    return bRet;
+}
+
 #define BUF_SIZE  512*1024
 int copyFile_winAPI(const string& srcFile, const string& desFilePath)
 {
@@ -980,6 +1005,7 @@ void onReboot() {
 
 void onShutdown() {
     std::cout << "onShutdown" << std::endl;
+    ShutdownComputer();
 }
 
 void onPacket(const net::Buffer::Ptr& packet) {
