@@ -339,8 +339,9 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
         std::lock_guard<std::mutex> guard(task->mtx);
         //重复提交任务，直到接收到提交成功或任务取消
         for (;;) {
+            std::cout << "commit task " << task->taskID << "length:" << jStr.length() << std::endl;
             g_netClient->Send(packet);
-            task->cv.wait_for(task->mtx, chrono::seconds(5));//如果没有被唤醒，则等待一秒
+            task->cv.wait_for(task->mtx, chrono::seconds(30));//如果没有被唤醒，则等待一秒
             if (task->state == taskCancel || task->state == taskFinish) {
                 std::vector<TASKINFO> tasks;
                 taskMapMtx.lock();
@@ -412,6 +413,7 @@ void SetTaskFiniedCallback(FuncTaskFinish callback)
 int toSolve(const string& sTaskID, const string& sConfigPath)
 {
     int iRet = -2;
+    ::printf(" ####### toSolve new task:%s   \n", sTaskID.c_str());
     //static volatile DWORD sl_dwLastRunTask = 0;
     /*if (true) {
         std::ofstream ofs;
@@ -438,21 +440,23 @@ int toSolve(const string& sTaskID, const string& sConfigPath)
         if (STATE_PROCESS_RUNNING == g_pipeMgr[0].GetState()
             /* || STATE_PROCESS_RUNNING == g_pipeMgr[1].GetState()*/)
         {
-           :: printf(" one resolver allowed and there is one  resolvers   running already, \n");
+            ::printf(" ****** new task  no ready process,one resolver allowed and there is one  resolvers   running already, \n");
             return  -1;
         }
     }
     else
     {
         if (STATE_PROCESS_RUNNING == g_pipeMgr[0].GetState()
-            &&  STATE_PROCESS_RUNNING == g_pipeMgr[1].GetState())
+            && STATE_PROCESS_RUNNING == g_pipeMgr[1].GetState())
         {
-           :: printf(" two resolvers  allowed and the two resolver are both running \n");
+            ::printf(" ******* new task  no ready process ,two resolvers  allowed and the two resolver are both running \n");
             return  -1;
         }
     }
 
-    for (int k = 0; k < 50; k++)
+    auto beg = std::chrono::steady_clock::now();
+
+    for (int k = 0; k < 1000; k++)
     {
         for (int i = 0; i < g_dwResolverNum; i++)
         {
@@ -461,18 +465,33 @@ int toSolve(const string& sTaskID, const string& sConfigPath)
                 iRet = g_pipeMgr[i].runTask(sTaskID, sConfigPath);
                 if (0 == iRet)
                 {
-                   return 0;
+                    
+                    auto end = std::chrono::steady_clock::now();
+                    auto diff = end - beg;
+                    std::cout << "use:" << diff.count() << std::endl;
+
+                    return 0;
                 }
                 else
                 {
-                    :: printf(" runTask failed process: %d task :%s \n",i ,sTaskID.c_str());
+                    ::printf(" runTask failed process: %d task :%s \n", i, sTaskID.c_str());
                     continue;
                 }
             }
         }
         Sleep(1000);
-      }
-   :: printf(" new task  no ready process \n");
+    }
+
+    if (1 == g_dwResolverNum)
+    {
+        ::printf(" ******** new task, no ready process for task:%s ,taskstate(onlyone):%d  \n",
+            sTaskID.c_str(), g_pipeMgr[0].GetState());
+    }
+    else
+    {
+        ::printf(" ******** new task, no ready process for task:%s ,taskstate1:%d,taskstate2:%d  \n",
+            sTaskID.c_str(), g_pipeMgr[0].GetState(), g_pipeMgr[1].GetState());
+    }
     return -2;
 }
 
@@ -1021,6 +1040,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
             taskMapMtx.lock();
             if (taskMap.end() != taskMap.find(msg["TaskID"].get<std::string>())) {
                 taskMapMtx.unlock();
+                cout << "DispatchJob " << taskID << " task already in taskMap" << endl;
                 return;
             }
             taskMapMtx.unlock();
@@ -1030,23 +1050,28 @@ void onPacket(const net::Buffer::Ptr& packet) {
             ofs << msg["Cfg"].get<std::string>();
             ofs.close();
 
+            cout << "DispatchJob " << taskID << endl;
 
-            toSolve(taskID,homepath + taskID);
-            
-            
-            auto t = std::shared_ptr<task>(new task());
-            t->taskID = taskID;
-            t->state = taskRunning;
-            t->compress = msg["Compress"].get<int>() == 1;
+            auto ret = toSolve(taskID,homepath + taskID);
 
-            std::vector<TASKINFO> tasks;
-            taskMapMtx.lock();
-            taskMap[taskID] = t;
-            for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
-                tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
+            if (ret == 0) {
+                auto t = std::shared_ptr<task>(new task());
+                t->taskID = taskID;
+                t->state = taskRunning;
+                t->compress = msg["Compress"].get<int>() == 1;
+
+                std::vector<TASKINFO> tasks;
+                taskMapMtx.lock();
+                taskMap[taskID] = t;
+                for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
+                    tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
+                }
+                g_netClient->Send(makeHeartBeatPacket(tasks));
+                taskMapMtx.unlock();
             }
-            g_netClient->Send(makeHeartBeatPacket(tasks));
-            taskMapMtx.unlock();
+            else {
+                cout << "toSolve error:" << ret << endl;
+            }
     }
     break;
     case 4://CmdAcceptJobResult = uint16(4)
