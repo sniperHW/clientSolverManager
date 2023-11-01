@@ -94,6 +94,8 @@ DWORD g_processorCount = 0;
 int   g_pauseFlag = 0;
 HANDLE g_hEvent_PauseSolver = INVALID_HANDLE_VALUE;
 
+std::ofstream logfile;
+
 //DWORD g_corePerProcessor = 0;
 
 //压缩相关
@@ -231,6 +233,7 @@ void getState(string& sComputerName, string& sIP, int& nMemSize, int& nErrorCode
 net::NetClient::Ptr g_netClient = nullptr;
 
 enum taskState {
+    taskInvaild,
     taskRunning, 
     taskWaitCommit,
     taskFinish,
@@ -258,10 +261,10 @@ struct task {
         cv.notify_one();
     }
 
-    taskState getState() {
+    /*taskState getState() {
         std::lock_guard<std::mutex> guard(mtx);
         return state;
-    }
+    }*/
 };
 
 std::map<std::string, std::shared_ptr<task>> taskMap;
@@ -339,10 +342,11 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
         std::lock_guard<std::mutex> guard(task->mtx);
         //重复提交任务，直到接收到提交成功或任务取消
         for (;;) {
-            std::cout << "commit task " << task->taskID << "length:" << jStr.length() << std::endl;
+            logfile << __FILE__ << ":" << __LINE__  << " send commit task " << task->taskID << "length:" << jStr.length() << std::endl;
             g_netClient->Send(packet);
             task->cv.wait_for(task->mtx, chrono::seconds(30));//如果没有被唤醒，则等待一秒
             if (task->state == taskCancel || task->state == taskFinish) {
+                logfile << __FILE__ << ":" << __LINE__  << " task finish " << task->taskID << "state:" << task->state << std::endl;
                 std::vector<TASKINFO> tasks;
                 taskMapMtx.lock();
                 taskMap.erase(task->taskID);
@@ -361,29 +365,26 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
         }
     }
     else {
-        std::cout << task->taskID << "result file not found" << std::endl;
+        logfile << __FILE__ << ":" << __LINE__  << " task:" << task->taskID << " result file not found" << std::endl;
     }
-
-
 }
 
 
-//接口：任务结束的回调函数，参数为任务ID
+//接口：任务解算连续重试3ci失败的回调函数，参数为任务ID
 void TaskFail(const string& sTaskID)
 {
 
 }
 
-
 //接口：任务结束的回调函数，参数为任务ID
 void TaskFinish(const string& sTaskID)
 {
-    cout << "task finish callback " << sTaskID << endl;
-
+    logfile << __FILE__ << ":" << __LINE__  << " On TaskFinish task:" << sTaskID << endl;
     taskMapMtx.lock();
     auto it = taskMap.find(sTaskID);
     if (taskMap.end() == it) {
         //不应该发生
+        logfile << __FILE__ << ":" << __LINE__  << " On TaskFinish task:" << sTaskID << " task not found" << endl;
         taskMapMtx.unlock();
         return;
     }
@@ -397,6 +398,7 @@ void TaskFinish(const string& sTaskID)
             task->mtx.unlock();
         }
         else {
+            logfile << __FILE__ << ":" << __LINE__  << " On TaskFinish task:" << sTaskID << " task invaild state:" << task->state << endl; 
             task->mtx.unlock();
             return;
         }
@@ -418,6 +420,7 @@ int toSolve(const string& sTaskID, const string& sConfigPath)
 {
     int iRet = -2;
     ::printf(" ####### toSolve new task:%s   \n", sTaskID.c_str());
+    logfile << __FILE__ << ":" << __LINE__  << " ####### toSolve new task:" << sTaskID << endl;
     //static volatile DWORD sl_dwLastRunTask = 0;
     /*if (true) {
         std::ofstream ofs;
@@ -445,6 +448,7 @@ int toSolve(const string& sTaskID, const string& sConfigPath)
             /* || STATE_PROCESS_RUNNING == g_pipeMgr[1].GetState()*/)
         {
             ::printf(" ****** new task  no ready process,one resolver allowed and there is one  resolvers   running already, \n");
+            logfile << __FILE__ << ":" << __LINE__  << " ****** new task  no ready process,one resolver allowed and there is one  resolvers   running already" << endl;
             return  -1;
         }
     }
@@ -454,6 +458,7 @@ int toSolve(const string& sTaskID, const string& sConfigPath)
             && STATE_PROCESS_RUNNING == g_pipeMgr[1].GetState())
         {
             ::printf(" ******* new task  no ready process ,two resolvers  allowed and the two resolver are both running \n");
+            logfile << __FILE__ << ":" << __LINE__  << " ******* new task  no ready process ,two resolvers  allowed and the two resolver are both running" << endl;
             return  -1;
         }
     }
@@ -490,11 +495,14 @@ int toSolve(const string& sTaskID, const string& sConfigPath)
     {
         ::printf(" ******** new task, no ready process for task:%s ,taskstate(onlyone):%d  \n",
             sTaskID.c_str(), g_pipeMgr[0].GetState());
+        logfile << __FILE__ << ":" << __LINE__  << " ******** new task, no ready process for task:" << sTaskID << ",taskstate(onlyone):" << g_pipeMgr[0].GetState() << endl;       
     }
     else
     {
         ::printf(" ******** new task, no ready process for task:%s ,taskstate1:%d,taskstate2:%d  \n",
             sTaskID.c_str(), g_pipeMgr[0].GetState(), g_pipeMgr[1].GetState());
+
+        logfile << __FILE__ << ":" << __LINE__  << " ******** new task, no ready process for task:" << sTaskID << ",taskstate1:" <<  g_pipeMgr[0].GetState() << ",taskstate2:" << g_pipeMgr[1].GetState() << endl;   
     }
     return -2;
 }
@@ -1037,6 +1045,8 @@ void onPacket(const net::Buffer::Ptr& packet) {
     auto jsonStr = std::string(&rawBuf[2], packet->Len() - 2);
     auto msg = json::parse(jsonStr);
 
+    logfile << __FILE__ << ":" << __LINE__ << " on packet:" << cmd << endl; 
+
     switch (cmd) {
     case 2: {//CmdDispatchJob
             auto taskID = msg["TaskID"].get<std::string>();
@@ -1044,7 +1054,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
             taskMapMtx.lock();
             if (taskMap.end() != taskMap.find(msg["TaskID"].get<std::string>())) {
                 taskMapMtx.unlock();
-                cout << "DispatchJob " << taskID << " task already in taskMap" << endl;
+                logfile << __FILE__ << ":" << __LINE__ << " DispatchJob " << taskID << " task already in taskMap" << endl;
                 return;
             }
             taskMapMtx.unlock();
@@ -1054,7 +1064,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
             ofs << msg["Cfg"].get<std::string>();
             ofs.close();
 
-            cout << "DispatchJob " << taskID << endl;
+            logfile << __FILE__ << ":" << __LINE__ << " DispatchJob " << taskID << endl;
 
             auto ret = toSolve(taskID,homepath + taskID);
 
@@ -1074,7 +1084,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
                 taskMapMtx.unlock();
             }
             else {
-                cout << "toSolve error:" << ret << endl;
+                logfile << __FILE__ << ":" << __LINE__<<"   " << "toSolve task:" << taskID << " error:" << ret << endl;
             }
     }
     break;
@@ -1085,13 +1095,17 @@ void onPacket(const net::Buffer::Ptr& packet) {
             auto it = taskMap.find(taskID);
             taskMapMtx.unlock();
             if (it != taskMap.end()) {
-            auto task = it->second;
+                auto task = it->second;
                 if (cmd == 4) {
+                    logfile << __FILE__ << ":" << __LINE__ << " task finish task:" << taskID << endl;
                     task->setStateAndNotify(taskFinish);
                 }
                 else {
+                    logfile << __FILE__ << ":" << __LINE__ << " task cancel task:" << taskID << endl;
                     task->setStateAndNotify(taskCancel);
                 }
+            } else {
+                logfile << __FILE__ << ":" << __LINE__ << "on cmd:" << cmd << "but task not found:" << taskID << endl;
             }
     }
     break;
@@ -1219,6 +1233,10 @@ int main(int argc,char **argv)
     homepath = sPath;
 
     ::printf("current path is :%s \n", sPath.c_str());
+
+    logfile.open(sPath+"/log.txt", std::ios::out);
+
+    logfile << __FILE__ << ":" << __LINE__ << "begin running ..." << std::endl;
 
     //测试时先注释掉
     //iRet = InitUploadSharePath();
