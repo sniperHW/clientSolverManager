@@ -512,7 +512,7 @@ int toSolve(const string& sTaskID, const string& sConfigPath)
 
     auto beg = std::chrono::steady_clock::now();
 
-    for (int k = 0; k < 1000; k++)
+    for (int k = 0; k < 250; k++)
     {
         for (int i = 0; i < g_dwResolverNum; i++)
         {
