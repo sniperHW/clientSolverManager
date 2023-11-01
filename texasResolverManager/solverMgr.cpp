@@ -1110,24 +1110,25 @@ void onPacket(const net::Buffer::Ptr& packet) {
             }
             taskMapMtx.unlock();
             task->setStateAndNotify(taskRunning);
-            if(isFileExists_ifstream(homepath + taskID+".json")){
+            //不排除计算进程写.json写到一半就崩溃的，此时结果文件是不完整的
+            /*if(isFileExists_ifstream(homepath + taskID+".json")){
                 //结果文件已经存在，直接走taskfinish
                 TaskFinish(taskID);
-            } else{
-                auto ret = toSolve(taskID,homepath + taskID);
-                if (ret == 0) {
-                    std::vector<TASKINFO> tasks;
-                    taskMapMtx.lock();
-                    for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
-                        tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
-                    }
-                    g_netClient->Send(makeHeartBeatPacket(tasks));
-                    taskMapMtx.unlock();
+            } else{*/
+            auto ret = toSolve(taskID,homepath + taskID);
+            if (ret == 0) {
+                std::vector<TASKINFO> tasks;
+                taskMapMtx.lock();
+                for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
+                    tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
                 }
-                else {
-                    logfile << __FILE__ << ":" << __LINE__<<"   " << "ReDispatchJob toSolve task:" << taskID << " error:" << ret << endl;
-                }
+                g_netClient->Send(makeHeartBeatPacket(tasks));
+                taskMapMtx.unlock();
             }
+            else {
+                logfile << __FILE__ << ":" << __LINE__<<"   " << "ReDispatchJob toSolve task:" << taskID << " error:" << ret << endl;
+            }
+            //}
     }
     break;
     case 2: {//CmdDispatchJob
