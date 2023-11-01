@@ -73,6 +73,10 @@ public:
 	{
 		return m_dwProcessState;
 	};
+	BOOL isReRunTask()
+	{
+		return m_bNeedReRuntask;
+	}
 	string GetCurTaskID()
 	{
 		return m_strTaskID;

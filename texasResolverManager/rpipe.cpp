@@ -11,6 +11,8 @@
 using namespace std;
 
 FuncTaskFinish g_funTaskFinished = NULL;
+void TaskFail(const string& sTaskID);
+
 CResolverPipe::CResolverPipe()
 {
     m_nIterationNum = 0;
@@ -439,13 +441,19 @@ int CResolverPipe::ReadPipeProc()
 			   {
 				   if (!m_stringConfigFile.empty())
 				   {
-                       if (m_dwRetryCount < 10)
+                       if (m_dwRetryCount < 3)
                        {
                            int iRet = ReRunTask();
-                           printf("runTask ret: iRet:%d \n", iRet);
+                           m_dwRetryCount++;
+                           printf("retry task:%s--trycount:%d-- iRet:%d --total seconds:%d\n", m_strTaskID.c_str(), m_dwRetryCount,iRet, GetTickCount() - m_dwStartTick);
                        }
-                       m_dwRetryCount++;
-	
+                       else
+                       {
+                           m_bNeedReRuntask = FALSE;
+                           m_dwRetryCount = 0;
+                           printf(" task fail:%s--trycount:%d --total seconds:%d\n", m_strTaskID.c_str(), m_dwRetryCount,GetTickCount() - m_dwStartTick);
+                           TaskFail(m_strTaskID);
+                       }
 				   }
 			   }
 			   else
@@ -466,6 +474,7 @@ int CResolverPipe::ReadPipeProc()
            {
                m_dwProcessState = STATE_PROCESS_FINISHED;
                m_dwFinishedSeconds = GetTickCount() - m_dwStartTick;
+               printf("task finshed:%s--trycount:%d-- total Seconds:%d \n", m_strTaskID.c_str(), m_dwRetryCount, m_dwFinishedSeconds);
                if (NULL != g_funTaskFinished)
                {
                    g_funTaskFinished(m_strTaskID);
@@ -524,7 +533,7 @@ int  CResolverPipe::runTask( string strTaskID, string stringConfigFile)
     pipeTask.dwMsgType = PIPEMSG_NOTIFYTASK;
     strcpy_s(pipeTask.strTaskID, 256, strTaskID.c_str());
     strcpy_s(pipeTask.strConfigPath, 256, stringConfigFile.c_str());
-    m_bNeedReRuntask = true;
+    m_bNeedReRuntask = TRUE;
     int iRet = writePipe( (char*)&pipeTask, sizeof(pipeTask));
     if (0 != iRet)
     {
@@ -551,7 +560,7 @@ int  CResolverPipe::ReRunTask()
     }
     if (m_stringConfigFile.empty())
     {
-        printf("ReRunTask, taskid is empty ");
+        printf("ReRunTask, task config file is empty ");
         return -1;
     }
     return runTask(m_strTaskID, m_stringConfigFile);

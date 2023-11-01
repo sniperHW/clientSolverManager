@@ -368,7 +368,11 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
 }
 
 
+//接口：任务结束的回调函数，参数为任务ID
+void TaskFail(const string& sTaskID)
+{
 
+}
 
 
 //接口：任务结束的回调函数，参数为任务ID
@@ -460,7 +464,7 @@ int toSolve(const string& sTaskID, const string& sConfigPath)
     {
         for (int i = 0; i < g_dwResolverNum; i++)
         {
-            if (STATE_PROCESS_READY == g_pipeMgr[i].GetState())
+            if (STATE_PROCESS_READY == g_pipeMgr[i].GetState()  && FALSE == g_pipeMgr[i].isReRunTask())
             {
                 iRet = g_pipeMgr[i].runTask(sTaskID, sConfigPath);
                 if (0 == iRet)
