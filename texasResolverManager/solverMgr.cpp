@@ -322,7 +322,7 @@ void notifyJobFailed(const std::shared_ptr<task> &task) {
         task->cv.wait_for(task->mtx, chrono::seconds(30));//如果没有被唤醒，则等待一秒
         if(task->state == taskRunning || task->state == taskFinish || task->state == taskCancel) 
         {
-            return
+            return;
         }    
     }
 }
@@ -330,7 +330,7 @@ void notifyJobFailed(const std::shared_ptr<task> &task) {
 //接口：任务解算连续重试3ci失败的回调函数，参数为任务ID
 void TaskFail(const string& sTaskID)
 {
-    logfile << __FILE__ << ":" << __LINE__  << " task:" << task->taskID << " failed" << std::endl;
+    logfile << __FILE__ << ":" << __LINE__  << " task:" << sTaskID << " failed" << std::endl;
     taskMapMtx.lock();
     auto it = taskMap.find(sTaskID);
     if (taskMap.end() == it) {
@@ -360,18 +360,26 @@ void TaskFail(const string& sTaskID)
 }
 
 void commitTaskRoutine(const std::shared_ptr<task> &task) {
+
+    logfile << __FILE__ << ":" << __LINE__ << " commitTaskRoutine task:" << task->taskID << endl;
+    logfile.flush();
+
     //读取result文件
     if (std::ifstream is{ homepath + task->taskID + ".json", std::ios::binary | std::ios::ate}) {
         auto size = is.tellg();
         std::string str(size, '\0'); // construct string to stream size
         is.seekg(0);
         if (is.read(&str[0], size))
-            std::cout << "read result ok" << std::endl;
+            logfile << __FILE__ << ":" << __LINE__ << "read result ok commitTaskRoutine task:" << task->taskID << endl;
         else
-            std::cout << "read result failed" << std::endl;
+            logfile << __FILE__ << ":" << __LINE__ << "read result failed commitTaskRoutine task:" << task->taskID << endl;
 
 
         is.close();
+
+
+        logfile << __FILE__ << ":" << __LINE__ << "before  compress task:" << task->taskID << endl;
+        logfile.flush();
 
         if (task->compress) {
             std::vector<char> compressed;
@@ -381,26 +389,42 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
             Base64Encode(s2,str);
         }
 
+        logfile << __FILE__ << ":" << __LINE__ << "compress ok task:" << task->taskID << endl;
+        logfile.flush();
+
     
         json j;
         j["TaskID"] = task->taskID;
         j["Result"] = str;
 
+        logfile << __FILE__ << ":" << __LINE__ << "before json dump task:" << task->taskID << endl;
+        logfile.flush();
+
         auto jStr = j.dump();
+
+        logfile << __FILE__ << ":" << __LINE__ << "json dump ok task:" << task->taskID << endl;
+        logfile.flush();
+
         auto packet = net::Buffer::New(6 + jStr.length());
 
         packet->Append(uint32_t(2 + jStr.length()));
         packet->Append(uint16_t(3));
         packet->Append(jStr);
 
+        logfile << __FILE__ << ":" << __LINE__ << " before try commit task:" << task->taskID << endl;
+        logfile.flush();
+
+
         std::lock_guard<std::mutex> guard(task->mtx);
         //重复提交任务，直到接收到提交成功或任务取消
         for (;;) {
             logfile << __FILE__ << ":" << __LINE__  << " send commit task " << task->taskID << "length:" << jStr.length() << std::endl;
+            logfile.flush();
             g_netClient->Send(packet);
             task->cv.wait_for(task->mtx, chrono::seconds(30));//如果没有被唤醒，则等待一秒
             if (task->state == taskCancel || task->state == taskFinish) {
                 logfile << __FILE__ << ":" << __LINE__  << " task finish " << task->taskID << "state:" << task->state << std::endl;
+                logfile.flush();
                 std::vector<TASKINFO> tasks;
                 taskMapMtx.lock();
                 taskMap.erase(task->taskID);
@@ -414,12 +438,15 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
                 filesystem::remove(homepath + task->taskID); //cfg文件
                 std::filesystem::remove(homepath + task->taskID + ".json");//结果文件
 
+                logfile << __FILE__ << ":" << __LINE__ << "remove tmp file  task finish " << task->taskID << "state:" << task->state << std::endl;
+                logfile.flush();
                 return;
             }
         }
     }
     else {
         logfile << __FILE__ << ":" << __LINE__  << " task:" << task->taskID << " result file not found" << std::endl;
+        logfile.flush();
     }
 }
 
@@ -427,6 +454,7 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
 void TaskFinish(const string& sTaskID)
 {
     logfile << __FILE__ << ":" << __LINE__  << " On TaskFinish task:" << sTaskID << endl;
+    logfile.flush();
     taskMapMtx.lock();
     auto it = taskMap.find(sTaskID);
     if (taskMap.end() == it) {
@@ -451,6 +479,8 @@ void TaskFinish(const string& sTaskID)
         }
 
         //启动提交routine,
+        logfile << __FILE__ << ":" << __LINE__ << " start commitTaskRoutine task:" << sTaskID << endl;
+        logfile.flush();
         auto t = std::thread(commitTaskRoutine, task);
         t.detach();
     }
@@ -1103,32 +1133,28 @@ void onPacket(const net::Buffer::Ptr& packet) {
     case 10:{//CmdReDispatchJob
             auto taskID = msg["TaskID"].get<std::string>();
             taskMapMtx.lock();
-            if (taskMap.end() == taskMap.find(msg["TaskID"].get<std::string>())) {
-                taskMapMtx.unlock();
-                logfile << __FILE__ << ":" << __LINE__ << " ReDispatchJob " << taskID << " task not found" << endl;
-                return;
-            }
+            auto it = taskMap.find(taskID);
             taskMapMtx.unlock();
-            task->setStateAndNotify(taskRunning);
-            //不排除计算进程写.json写到一半就崩溃的，此时结果文件是不完整的
-            /*if(isFileExists_ifstream(homepath + taskID+".json")){
-                //结果文件已经存在，直接走taskfinish
-                TaskFinish(taskID);
-            } else{*/
-            auto ret = toSolve(taskID,homepath + taskID);
-            if (ret == 0) {
-                std::vector<TASKINFO> tasks;
-                taskMapMtx.lock();
-                for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
-                    tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
+            if (it != taskMap.end()) {
+                auto task = it->second;
+                task->setStateAndNotify(taskRunning);
+                auto ret = toSolve(taskID, homepath + taskID);
+                if (ret == 0) {
+                    std::vector<TASKINFO> tasks;
+                    taskMapMtx.lock();
+                    for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
+                        tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
+                    }
+                    g_netClient->Send(makeHeartBeatPacket(tasks));
+                    taskMapMtx.unlock();
                 }
-                g_netClient->Send(makeHeartBeatPacket(tasks));
-                taskMapMtx.unlock();
+                else {
+                    logfile << __FILE__ << ":" << __LINE__ << "   " << "ReDispatchJob toSolve task:" << taskID << " error:" << ret << endl;
+                }
             }
             else {
-                logfile << __FILE__ << ":" << __LINE__<<"   " << "ReDispatchJob toSolve task:" << taskID << " error:" << ret << endl;
+                logfile << __FILE__ << ":" << __LINE__ << " ReDispatchJob " << taskID << " task not found" << endl;
             }
-            //}
     }
     break;
     case 2: {//CmdDispatchJob
@@ -1319,7 +1345,7 @@ int main(int argc,char **argv)
 
     logfile.open(sPath+"/log.txt", std::ios::out);
 
-    logfile << __FILE__ << ":" << __LINE__ << "begin running ..." << std::endl;
+    logfile << __FILE__ << ":" << __LINE__ << " begin running ..." << std::endl;
 
     //测试时先注释掉
     //iRet = InitUploadSharePath();
