@@ -121,6 +121,17 @@ void compress(const string& in, std::vector<char>& out)
     boost::iostreams::close(fos);  // flush. 此函数调用后,存储的是gzip压缩后的数据
 }
 
+void uncompress(const string& in, std::vector<char>& out)
+{
+    using namespace boost::iostreams;
+    filtering_ostream fos;    // 具有filter功能的输出流
+    //fos.push(bzip2_compressor());// gzip_compressor(gzip_params(gzip::best_compression)));  // gzip压缩功能
+    fos.push(lzma_decompressor(lzma_params(lzma::best_compression)));
+    fos.push(boost::iostreams::back_inserter(out));     // 输出流的数据的目的地
+    fos.write((const char*)(in.c_str()), in.length());
+    boost::iostreams::close(fos);  // flush. 此函数调用后,存储的是gzip压缩后的数据
+}
+
 // 编码
 bool Base64Encode(const string& input, string& output)
 {
@@ -131,6 +142,13 @@ bool Base64Encode(const string& input, string& output)
     return true;
 }
 
+bool Base64Decode(const string& input, string& output)
+{
+    std::size_t len = input.size();
+    output.resize(boost::beast::detail::base64::decoded_size(len));
+    output.resize(boost::beast::detail::base64::decode(&output[0], input.c_str(), len).first);
+    return true;
+}
 
 void GetSytemInfo()
 {
@@ -370,15 +388,15 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
         std::string str(size, '\0'); // construct string to stream size
         is.seekg(0);
         if (is.read(&str[0], size))
-            logfile << __FILE__ << ":" << __LINE__ << "read result ok commitTaskRoutine task:" << task->taskID << endl;
+            logfile << __FILE__ << ":" << __LINE__ << " read result ok commitTaskRoutine task:" << task->taskID << endl;
         else
-            logfile << __FILE__ << ":" << __LINE__ << "read result failed commitTaskRoutine task:" << task->taskID << endl;
+            logfile << __FILE__ << ":" << __LINE__ << " read result failed commitTaskRoutine task:" << task->taskID << endl;
 
 
         is.close();
 
 
-        logfile << __FILE__ << ":" << __LINE__ << "before  compress task:" << task->taskID << endl;
+        logfile << __FILE__ << ":" << __LINE__ << " before  compress task:" << task->taskID << endl;
         logfile.flush();
 
         if (task->compress) {
@@ -389,7 +407,7 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
             Base64Encode(s2,str);
         }
 
-        logfile << __FILE__ << ":" << __LINE__ << "compress ok task:" << task->taskID << endl;
+        logfile << __FILE__ << ":" << __LINE__ << " compress ok task:" << task->taskID << endl;
         logfile.flush();
 
     
@@ -397,12 +415,12 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
         j["TaskID"] = task->taskID;
         j["Result"] = str;
 
-        logfile << __FILE__ << ":" << __LINE__ << "before json dump task:" << task->taskID << endl;
+        logfile << __FILE__ << ":" << __LINE__ << " before json dump task:" << task->taskID << endl;
         logfile.flush();
 
         auto jStr = j.dump();
 
-        logfile << __FILE__ << ":" << __LINE__ << "json dump ok task:" << task->taskID << endl;
+        logfile << __FILE__ << ":" << __LINE__ << " json dump ok task:" << task->taskID << endl;
         logfile.flush();
 
         auto packet = net::Buffer::New(6 + jStr.length());
@@ -418,27 +436,38 @@ void commitTaskRoutine(const std::shared_ptr<task> &task) {
         std::lock_guard<std::mutex> guard(task->mtx);
         //重复提交任务，直到接收到提交成功或任务取消
         for (;;) {
-            logfile << __FILE__ << ":" << __LINE__  << " send commit task " << task->taskID << "length:" << jStr.length() << std::endl;
+            logfile << __FILE__ << ":" << __LINE__  << " send commit task " << task->taskID << " length:" << jStr.length() << std::endl;
             logfile.flush();
             g_netClient->Send(packet);
             task->cv.wait_for(task->mtx, chrono::seconds(30));//如果没有被唤醒，则等待一秒
             if (task->state == taskCancel || task->state == taskFinish) {
-                logfile << __FILE__ << ":" << __LINE__  << " task finish " << task->taskID << "state:" << task->state << std::endl;
+                logfile << __FILE__ << ":" << __LINE__  << " task finish " << task->taskID << " state:" << task->state << std::endl;
                 logfile.flush();
                 std::vector<TASKINFO> tasks;
                 taskMapMtx.lock();
+                logfile << __FILE__ << ":" << __LINE__ << " task finish " << task->taskID << " 1" << std::endl;
+                logfile.flush();
                 taskMap.erase(task->taskID);
+                logfile << __FILE__ << ":" << __LINE__ << " task finish " << task->taskID << " 2" << std::endl;
+                logfile.flush();
                 for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
                     tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
                 }
+                logfile << __FILE__ << ":" << __LINE__ << " task finish " << task->taskID << " 3" << std::endl;
+                logfile.flush();
                 g_netClient->Send(makeHeartBeatPacket(tasks));
+                logfile << __FILE__ << ":" << __LINE__ << " task finish " << task->taskID << " 4" << std::endl;
+                logfile.flush();
                 taskMapMtx.unlock();
-
+                logfile << __FILE__ << ":" << __LINE__ << " task finish " << task->taskID << " 5" << std::endl;
+                logfile.flush();
                 //删除本地文件
                 filesystem::remove(homepath + task->taskID); //cfg文件
+                logfile << __FILE__ << ":" << __LINE__ << " task finish " << task->taskID << " 6" << std::endl;
+                logfile.flush();
                 std::filesystem::remove(homepath + task->taskID + ".json");//结果文件
 
-                logfile << __FILE__ << ":" << __LINE__ << "remove tmp file  task finish " << task->taskID << "state:" << task->state << std::endl;
+                logfile << __FILE__ << ":" << __LINE__ << " remove tmp file  task finish " << task->taskID << " state:" << task->state << std::endl;
                 logfile.flush();
                 return;
             }
@@ -473,8 +502,17 @@ void TaskFinish(const string& sTaskID)
             task->mtx.unlock();
         }
         else {
-            logfile << __FILE__ << ":" << __LINE__  << " On TaskFinish task:" << sTaskID << " task invaild state:" << task->state << endl; 
+            logfile << __FILE__ << ":" << __LINE__  << " On TaskFinish task:" << sTaskID << " task invaild state:" << task->state << endl;
             task->mtx.unlock();
+            //清除任务，向sche发送心跳
+            std::vector<TASKINFO> tasks;
+            taskMapMtx.lock();
+            taskMap.erase(task->taskID);
+            for (auto it = taskMap.begin(); it != taskMap.end(); it++) {
+                tasks.push_back(_TASKINFO(it->second->taskID, it->second->nContinuedSeconds, it->second->nIterationNum, it->second->dExploit));
+            }
+            g_netClient->Send(makeHeartBeatPacket(tasks));
+            taskMapMtx.unlock();
             return;
         }
 
@@ -1323,6 +1361,54 @@ int  InitTaskShedule()
 }
 int main(int argc,char **argv)
 {
+
+
+    std::ifstream f("C:\\git\\TurnRangeGenerator_HW\\x64\\Debug\\BTN_vsHJ_srp{6h7h9d}.json");
+    json data = json::parse(f);    
+    
+    //auto v2d2c = data["strategy"]["2d2c"];
+    data["strategy"]["strategy"]["2d2c"][0] = 1.12f;
+
+    std::ofstream outfile;
+
+    outfile.open("out.json", std::ios::out);
+
+    outfile << data.dump() << std::endl;
+
+    outfile.close();
+
+
+
+    /*std::vector<char> compressed;
+
+    std::string str = "123456";
+
+    compress(str, compressed);
+    string s2;
+    s2.assign((const char*)compressed.data(), compressed.size());
+    Base64Encode(s2, str);
+
+    std::cout << str << std::endl;
+
+
+    //str为加密后的文件内容
+    string base64str;
+    //首先base64解码
+    Base64Decode(str, base64str);
+    std::vector<char> decompressed;
+    //解压
+    uncompress(base64str,decompressed);
+
+    //将解压后的内容复制到s3
+    string s3;
+    s3.assign((const char*)decompressed.data(), decompressed.size());
+
+
+    std::cout << s3 << std::endl;
+    */
+
+    return 0;
+
 
     int iRet = -1;
 
