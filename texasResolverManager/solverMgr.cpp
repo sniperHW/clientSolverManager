@@ -57,6 +57,7 @@ typedef struct _TASKINFO
     int nIterationNum;
     double dExploit;
     BOOL bFinished;
+    int  MemNeed;
 
     _TASKINFO()
     {
@@ -268,6 +269,7 @@ struct task {
     int         nContinuedSeconds; //单位，毫秒
     int         nIterationNum;
     double      dExploit;
+    int         MemNeed;
 
     task():compress(false),nContinuedSeconds(0), nIterationNum(0), dExploit(0) {
 
@@ -531,8 +533,24 @@ void SetTaskFiniedCallback(FuncTaskFinish callback)
 
 
 //接口：执行解算任务
-int toSolve(const string& sTaskID, const string& sConfigPath)
+int toSolve(const string& sTaskID, const string& sConfigPath,int MemNeed)
 {
+    for (;;) {
+        _MEMORYSTATUSEX  msEx;
+        msEx.dwLength = sizeof(msEx);
+        bool bRet = ::GlobalMemoryStatusEx(&msEx);
+        if (bRet)
+        {
+            auto m = (DWORD)(msEx.ullAvailPhys / (1024 * 1024));
+            if (m >= MemNeed)
+            {
+                break;
+            }
+        }
+        Sleep(1000);
+    }
+
+
     int iRet = -2;
     ::printf(" ####### toSolve new task:%s   \n", sTaskID.c_str());
     logfile << __FILE__ << ":" << __LINE__  << " ####### toSolve new task:" << sTaskID << endl;
@@ -1176,7 +1194,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
             if (it != taskMap.end()) {
                 auto task = it->second;
                 task->setStateAndNotify(taskRunning);
-                auto ret = toSolve(taskID, homepath + taskID);
+                auto ret = toSolve(taskID, homepath + taskID,task->MemNeed);
                 if (ret == 0) {
                     std::vector<TASKINFO> tasks;
                     taskMapMtx.lock();
@@ -1198,6 +1216,7 @@ void onPacket(const net::Buffer::Ptr& packet) {
     case 2: {//CmdDispatchJob
             auto taskID = msg["TaskID"].get<std::string>();
             auto CfgPath = msg["TaskID"].get<std::string>();
+            auto MemNeed = msg["MemNeed"].get<int>();
             taskMapMtx.lock();
             if (taskMap.end() != taskMap.find(msg["TaskID"].get<std::string>())) {
                 taskMapMtx.unlock();
@@ -1213,13 +1232,14 @@ void onPacket(const net::Buffer::Ptr& packet) {
 
             logfile << __FILE__ << ":" << __LINE__ << " DispatchJob " << taskID << endl;
 
-            auto ret = toSolve(taskID,homepath + taskID);
+            auto ret = toSolve(taskID,homepath + taskID, MemNeed);
 
             if (ret == 0) {
                 auto t = std::shared_ptr<task>(new task());
                 t->taskID = taskID;
                 t->state = taskRunning;
                 t->compress = msg["Compress"].get<int>() == 1;
+                t->MemNeed = MemNeed;
 
                 std::vector<TASKINFO> tasks;
                 taskMapMtx.lock();
@@ -1361,54 +1381,6 @@ int  InitTaskShedule()
 }
 int main(int argc,char **argv)
 {
-
-
-    std::ifstream f("C:\\git\\TurnRangeGenerator_HW\\x64\\Debug\\BTN_vsHJ_srp{6h7h9d}.json");
-    json data = json::parse(f);    
-    
-    //auto v2d2c = data["strategy"]["2d2c"];
-    data["strategy"]["strategy"]["2d2c"][0] = 1.12f;
-
-    std::ofstream outfile;
-
-    outfile.open("out.json", std::ios::out);
-
-    outfile << data.dump() << std::endl;
-
-    outfile.close();
-
-
-
-    /*std::vector<char> compressed;
-
-    std::string str = "123456";
-
-    compress(str, compressed);
-    string s2;
-    s2.assign((const char*)compressed.data(), compressed.size());
-    Base64Encode(s2, str);
-
-    std::cout << str << std::endl;
-
-
-    //str为加密后的文件内容
-    string base64str;
-    //首先base64解码
-    Base64Decode(str, base64str);
-    std::vector<char> decompressed;
-    //解压
-    uncompress(base64str,decompressed);
-
-    //将解压后的内容复制到s3
-    string s3;
-    s3.assign((const char*)decompressed.data(), decompressed.size());
-
-
-    std::cout << s3 << std::endl;
-    */
-
-    return 0;
-
 
     int iRet = -1;
 
@@ -1611,7 +1583,7 @@ int main(int argc,char **argv)
 				::printf(" task ID is:%s\n", strTaskID.c_str());
 				::printf(" input File  is:%s\n", strInputFile.c_str());
 
-				toSolve(strTaskID, strInputFile);
+				toSolve(strTaskID, strInputFile,10);
 				strTaskID = "";
 				strInputFile = "";
 			}
