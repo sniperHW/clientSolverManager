@@ -93,6 +93,7 @@ string g_sLocalIP;
 DWORD g_dwMemSize = 0;
 DWORD g_processorCount = 0;
 int   g_pauseFlag = 0;
+int   g_mem = 0;
 HANDLE g_hEvent_PauseSolver = INVALID_HANDLE_VALUE;
 
 std::ofstream logfile;
@@ -168,6 +169,7 @@ void GetSytemInfo()
     if (bRet)
     {
         g_dwMemSize = (DWORD)(msEx.ullTotalPhys / (1024 * 1024));
+        g_dwMemSize += (g_mem *1024);
        :: printf("mem size:%d \n", g_dwMemSize);
     }
 
@@ -1393,7 +1395,7 @@ int main(int argc,char **argv)
         return -1;
     }
 
-    GetSytemInfo();
+
 
     std::string sPath = GetCurrentPath();
 
@@ -1441,6 +1443,12 @@ int main(int argc,char **argv)
     {
         g_dwResolverNum = 1;
     }
+
+    g_mem = GetPrivateProfileIntA("control", "mem",
+        0, sConfigFile.c_str());
+    GetSytemInfo();
+
+
     ::printf("max resolve process allowed is :%d\n", g_dwResolverNum);
     //printf("current path is :%s \n", sPath.c_str());
     string sExe1 = sPath + "console_solver.exe";
